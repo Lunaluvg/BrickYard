@@ -1,18 +1,25 @@
-// Two players, two ways to link up:
+// Up to five players, two ways to link up:
 //  • On your own network with play-together.bat: server.js serves the game and passes messages along.
-//  • Anywhere, with the game on a website: one player taps Start and gets a 4-digit code, the other joins
-//    with it, and the two browsers then talk directly (WebRTC). A free public service, PeerJS, introduces them.
-// Either way the first player hosts: their browser runs the physics and sends every change to the world as
-// an "op", while the other player's actions go to the host as commands. Both screens show the same world.
+//  • Anywhere with internet, with the game on a website: one player taps Start and gets a 4-digit code, and
+//    friends join with the code or an invite link, from any WiFi or mobile data. Each friend's browser then
+//    talks directly to the host's (WebRTC). PeerJS, a free public service, introduces them, and relays the
+//    link when two networks won't let the browsers reach each other directly.
+// Either way one player hosts: their browser runs the physics and sends every change to the world as an "op"
+// to everyone, while the others' actions go to the host as commands. Every screen shows the same world.
+// If the host leaves, the player with the lowest number takes the game over and the others follow.
 // brickyard.html loads this only over http(s); opened as a plain file, the game is solo.
 
-const TINT = { 1: '#F2CD37', 2: '#36AEBF' };
+const MAX_PLAYERS = 5;
+const PROTOCOL = 2; // copies of the game on different versions can't play together; bump when the messages change
+const TINT = { 1: '#F2CD37', 2: '#36AEBF', 3: '#FE8A18', 4: '#AC78BA', 5: '#BBE90B' };
 const PEERJS = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';
 const ROOM_ID = code => `brickyard-game-${code}`; // what a hosted game is called on the PeerJS service
 const CHUNK = 16000; // characters per WebRTC message; Safari takes 64 KB at most
 const nameOf = slot => `Player ${slot}`;
 const r2 = v => Math.round(v * 100) / 100, r3 = v => Math.round(v * 1e3) / 1e3, r4 = v => Math.round(v * 1e4) / 1e4;
 const nums = (a, n) => Array.isArray(a) && a.length === n && a.every(Number.isFinite);
+const isSlot = s => Number.isInteger(s) && s >= 1 && s <= MAX_PLAYERS;
+const wait = ms => new Promise(res => setTimeout(res, ms));
 
 export function start(g) {
   fetch('/mp-info', { cache: 'no-store' })
@@ -36,31 +43,106 @@ function loadPeerJS() {
 
 function run(g, info) {
   const { THREE, net } = g, $ = id => document.getElementById(id), lan = !!info;
-  let link = null, me = 0, peer = 0, mode = '', seen = null;
+  const keep = { // per tab, so a reload carries on in the same game as the same player
+    get: k => { try { return sessionStorage.getItem(k); } catch (e) { return null; } },
+    set: (k, v) => { try { sessionStorage.setItem(k, v); } catch (e) { /* fine */ } },
+    del: k => { try { sessionStorage.removeItem(k); } catch (e) { /* fine */ } },
+  };
+  const tab = keep.get('brickyard-tab') || Math.random().toString(36).slice(2, 10); // tells the host it's still us after a reconnect
+  keep.set('brickyard-tab', tab);
+  let me = 0, hostSlot = 0, mode = '', leaving = false;
+  const roster = new Set(); // everyone in the game, us included
+  const seen = new Map();   // slot → what that player is up to: their camera and the part in their hand
+  const looks = new Map();  // slot → how we draw them: { head, ghost, box, tag }
+  // Who we talk to: a guest only to the host, the host to each guest.
+  let hostSend = null, hostConn = null;
+  const guestSends = new Map(), guestConns = new Map(), guestTabs = new Map(), slowSlots = new Set();
   let out = [], queued = false, lastHist = '', lastMe = '', meAt = 0, poseAt = 0, sent = new WeakMap();
-  let tries = 0;                                                    // home WiFi: reconnect backoff
-  let pj = null, conn = null, role = '', code = '', gen = 0, retries = 0, retryTimer = 0, msgId = 0, pieces = {}; // online
+  let lanSend = null, tries = 0;                // home WiFi
+  let pj = null, code = '', gen = 0, msgId = 0, heardAt = 0; // online
   const gliding = new Set(), vA = new THREE.Vector3(), vB = new THREE.Vector3(), qA = new THREE.Quaternion();
-  const sendText = s => { if (link) link.send(s); };
-  const send = m => sendText(JSON.stringify(m));
-  function deliver(text) { let m; try { m = JSON.parse(text); } catch (e) { return; } receive(m); }
 
-  function receive(m) {
+  const toHost = m => { if (hostSend) hostSend(JSON.stringify(m)); };
+  const toGuest = (slot, m) => { const send = guestSends.get(slot); if (send) send(JSON.stringify(m)); };
+  function toGuests(m, except = 0) {
+    if (!guestSends.size) return;
+    const text = JSON.stringify(m);
+    if (lan && !except) { if (lanSend) lanSend(text); return; } // the play-together server hands it to every guest
+    for (const [slot, send] of guestSends) if (slot !== except) send(text);
+  }
+  function deliver(text, from) { let m; try { m = JSON.parse(text); } catch (e) { return; } if (m && typeof m === 'object') receive(m, from); }
+
+  // `from` is the guest a message came from when we host; 0 means the host, or the play-together server.
+  function receive(m, from) {
+    if (from) {
+      if (net.guest || !roster.has(from)) return;
+      if (m.t === 'cmd') command(m, from);
+      else if (m.t === 'me') { seen.set(from, m); toGuests({ ...m, s: from }, from); }
+      else if (m.t === 'say' && typeof m.m === 'string') { g.toast(`${nameOf(from)} ${m.m}`); toGuests({ t: 'say', s: from, m: m.m }, from); }
+      return;
+    }
     switch (m.t) {
-      case 'hello': me = m.slot; becomeHost(m.host); setPeer(m.peer || 0); break;
-      case 'peer':
-        if (m.on) { setPeer(m.slot); if (!net.guest) sendWorld(); g.toast(`${nameOf(m.slot)} joined`); }
-        else { setPeer(0); g.toast(`${nameOf(m.slot)} left`); }
-        break;
-      case 'host': becomeHost(true); break;
-      case 'full': if (lan) show('full'); else giveUp('That game already has two players'); break;
+      case 'hello': welcome(m); break;
+      case 'peer': if (isSlot(m.slot) && m.slot !== me) { if (m.on) joined(m.slot, !!m.back); else left(m.slot); } break;
+      case 'host': if (lan && isSlot(m.slot)) newHost(m.slot); break;
+      case 'full': if (lan) { alone(); show('full'); } break;
       case 'ops': if (net.guest) applyOps(m.o); break;
       case 'xf': if (net.guest) poses(m.d); break;
-      case 'cmd': if (!net.guest) command(m); break;
-      case 'me': seen = m; break;
-      case 'say': if (peer && typeof m.m === 'string') g.toast(`${nameOf(peer)} ${m.m}`); break;
+      case 'me': if (net.guest && isSlot(m.s) && m.s !== me) seen.set(m.s, m); break;
+      case 'say': if (isSlot(m.s) && m.s !== me && typeof m.m === 'string') g.toast(`${nameOf(m.s)} ${m.m}`); break;
     }
   }
+
+  /* ───────── Who's in the game ───────── */
+  // We're in: the play-together server (home WiFi) or the host (online) says who we are and who else is here.
+  function welcome(m) {
+    if (!isSlot(m.slot)) return;
+    me = m.slot; hostSlot = isSlot(m.hostSlot) ? m.hostSlot : me;
+    roster.clear(); roster.add(me);
+    for (const s of Array.isArray(m.roster) ? m.roster : []) if (isSlot(s)) roster.add(s);
+    for (const s of [...looks.keys()]) if (!roster.has(s)) dropLook(s);
+    keep.set('brickyard-slot', String(me));
+    if (!lan) { keep.set('brickyard-join', code); keep.del('brickyard-host'); }
+    if (lan && me === hostSlot) for (const s of roster) if (s !== me) addLanGuest(s);
+    becomeHost(me === hostSlot);
+    lastMe = '';
+    show('in');
+  }
+  // Someone came in. When we host, they get the whole world and what everyone is doing.
+  function joined(slot, back) {
+    roster.add(slot);
+    if (!net.guest) {
+      if (lan) addLanGuest(slot);
+      else toGuests({ t: 'peer', slot, on: true, back }, slot);
+      sendWorld(slot);
+      for (const [s, m] of seen) if (s !== slot) toGuest(slot, { ...m, s });
+      lastMe = ''; // and us
+    }
+    if (!back) g.toast(`${nameOf(slot)} joined`);
+    updateUi();
+  }
+  function left(slot) {
+    if (!roster.delete(slot)) return;
+    seen.delete(slot); dropLook(slot);
+    if (!net.guest) {
+      guestSends.delete(slot); guestConns.delete(slot); guestTabs.delete(slot);
+      if (slowSlots.delete(slot)) { net.remoteSlow = slowSlots.size > 0; g.updateSlow(); }
+      if (!lan) toGuests({ t: 'peer', slot, on: false });
+    }
+    g.toast(`${nameOf(slot)} left`);
+    updateUi();
+  }
+  // Home WiFi: the host left and the play-together server picked the next player.
+  function newHost(slot) {
+    hostSlot = slot;
+    if (slot === me) {
+      for (const s of roster) if (s !== me) addLanGuest(s);
+      becomeHost(true);
+      sendWorld(); // so every screen matches ours again
+    }
+    updateUi();
+  }
+  const addLanGuest = s => guestSends.set(s, text => { if (lanSend) lanSend(`@${s}\n${text}`); });
   function becomeHost(host) {
     if (net.guest === !host) return;
     net.guest = !host;
@@ -68,45 +150,41 @@ function run(g, info) {
       g.undoStack.length = g.redoStack.length = 0;
       net.canUndo = net.canRedo = false;
     } else {
-      net.remoteSlow = false;
+      net.remoteSlow = false; slowSlots.clear();
       gliding.clear();
       for (const c of g.chunks.values()) { c.group.position.copy(c.body.position); c.group.quaternion.copy(c.body.quaternion); }
     }
     g.updateSlow(); g.changed();
   }
-  function setPeer(slot) {
-    peer = slot; seen = null; lastHist = ''; lastMe = ''; out = []; sent = new WeakMap();
-    hidePeer();
-    if (slot) { tag.textContent = nameOf(slot); tag.style.setProperty('--c', TINT[slot]); head.skin.color.set(TINT[slot]); pBox.material.color.set(TINT[slot]); }
-    show(slot ? 'together' : lan ? 'alone' : role === 'host' ? 'waiting' : 'idle');
-  }
-  // The link to the other player dropped: carry on alone with the world as it is.
-  function lost() {
-    const had = peer;
-    link = null; setPeer(0); becomeHost(true);
-    return had;
+  // The link dropped: carry on alone with the world as it is.
+  function alone() {
+    hostSend = null; hostConn = null;
+    guestSends.clear(); guestConns.clear(); guestTabs.clear(); slowSlots.clear();
+    roster.clear(); if (me) roster.add(me);
+    seen.clear(); for (const s of [...looks.keys()]) dropLook(s);
+    becomeHost(true);
   }
 
   /* ───────── Hooks the game calls (see `net` in brickyard.html) ───────── */
   net.op = (...op) => {
-    if (net.guest || !peer) return;
+    if (net.guest || !guestSends.size) return;
     if (op[0] === 'hist') { const h = `${op[1]},${op[2]}`; if (h === lastHist) return; lastHist = h; }
     out.push(op);
     if (!queued) { queued = true; queueMicrotask(flush); }
   };
-  function flush() { queued = false; if (out.length) { send({ t: 'ops', o: out }); out = []; } }
-  net.cmd = (c, data) => send({ t: 'cmd', c, ...data });
-  net.say = text => { if (peer) send({ t: 'say', m: text }); };
+  function flush() { queued = false; if (out.length) { toGuests({ t: 'ops', o: out }); out = []; } }
+  net.cmd = (c, data) => toHost({ t: 'cmd', c, ...data });
+  net.say = text => { if (roster.size > 1) net.guest ? toHost({ t: 'say', m: text }) : toGuests({ t: 'say', s: me, m: text }); };
   net.frame = (dt, now) => {
-    if (!peer) return;
+    if (roster.size < 2) return;
     if (net.guest) glide(dt);
     else if (now - poseAt > 33) { poseAt = now; sendPoses(); }
     if (now - meAt > 80) { meAt = now; sendMe(); }
-    drawPeer(dt);
+    drawPeers(dt);
   };
 
-  /* ───────── Host: the whole world for a new player, then their commands ───────── */
-  function sendWorld() {
+  /* ───────── Host: the whole world for a newcomer, then everyone's commands ───────── */
+  function sendWorld(to = 0) {
     flush();
     const o = [['reset']];
     for (const b of g.bricks.values()) o.push(['+b', b.data, 0]);
@@ -116,10 +194,10 @@ function run(g, info) {
     const hist = [g.undoStack.length > 0, g.redoStack.length > 0];
     lastHist = hist.join(',');
     o.push(['base', g.state.base], ['clutch', g.state.clutch], ['ts', g.timeScale()], ['hist', ...hist]);
-    send({ t: 'ops', o });
+    if (to) toGuest(to, { t: 'ops', o }); else toGuests({ t: 'ops', o });
     sent = new WeakMap();
   }
-  function command(m) {
+  function command(m, from) {
     const T = g.TYPE_BY_ID, okColor = c => Number.isInteger(c) && !!g.COLORS[c];
     switch (m.c) {
       case 'add': {
@@ -151,8 +229,8 @@ function run(g, info) {
       case 'load': try { g.openModel(m.model); } catch (err) { /* not a model; the sender already checked */ } break;
       case 'base': if (Number.isInteger(m.i) && g.BASES[m.i]) { g.setBase(m.i); g.scheduleSave(); } break;
       case 'clutch': if (Number.isInteger(m.i) && g.CLUTCH[m.i]) g.setClutch(m.i); break;
-      case 'slow': net.remoteSlow = !!m.on; g.updateSlow(); break;
-      case 'resync': sendWorld(); break;
+      case 'slow': if (m.on) slowSlots.add(from); else slowSlots.delete(from); net.remoteSlow = slowSlots.size > 0; g.updateSlow(); break;
+      case 'resync': sendWorld(from); break;
     }
   }
 
@@ -162,7 +240,7 @@ function run(g, info) {
     for (const o of ops) {
       try { applyOp(o); } catch (err) {
         console.warn('Brickyard: out of step with the host, asking for the whole world again.', err);
-        send({ t: 'cmd', c: 'resync' });
+        toHost({ t: 'cmd', c: 'resync' });
         break;
       }
     }
@@ -197,7 +275,7 @@ function run(g, info) {
     }
   }
 
-  /* ───────── Loose pieces: the host streams where they are, the guest glides them there ───────── */
+  /* ───────── Loose pieces: the host streams where they are, guests glide them there ───────── */
   function sendPoses() {
     flush(); // a piece's "+c" op always goes out before its first position
     const d = [];
@@ -207,7 +285,7 @@ function run(g, info) {
       if (was && was.every((x, i) => x === v[i])) continue;
       sent.set(c, v); d.push(nid, ...v);
     }
-    if (d.length) send({ t: 'xf', d });
+    if (d.length) toGuests({ t: 'xf', d });
   }
   function poses(d) {
     if (!Array.isArray(d)) return;
@@ -230,154 +308,282 @@ function run(g, info) {
     }
   }
 
-  /* ───────── Seeing each other: a minifig head at their camera, and the part they're about to place ───────── */
-  const head = minifigHead(THREE);
-  const pGhostMat = new THREE.MeshStandardMaterial({ transparent: true, opacity: 0.45, depthWrite: false, roughness: 0.35 });
-  const pGhost = new THREE.Mesh(new THREE.BufferGeometry(), pGhostMat);
-  const pBox = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)), new THREE.LineBasicMaterial({ transparent: true }));
-  pGhost.renderOrder = 9; pBox.renderOrder = 19;
-  for (const o of [pGhost, pBox]) o.raycast = () => {};
-  g.scene.add(head, pGhost, pBox);
-  const tag = document.createElement('div');
-  tag.className = 'peer-tag';
-  document.body.appendChild(tag);
-  hidePeer();
-
+  /* ───────── Seeing each other: a minifig head at each player's camera, and the part they're about to place ───────── */
+  const edges = new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)), noGeo = new THREE.BufferGeometry();
+  function lookFor(slot) {
+    let L = looks.get(slot);
+    if (L) return L;
+    const tint = TINT[slot], head = minifigHead(THREE, tint);
+    const ghost = new THREE.Mesh(noGeo, new THREE.MeshStandardMaterial({ transparent: true, opacity: 0.45, depthWrite: false, roughness: 0.35 }));
+    const box = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: tint, transparent: true }));
+    ghost.renderOrder = 9; box.renderOrder = 19;
+    ghost.raycast = box.raycast = () => {};
+    head.visible = ghost.visible = box.visible = false;
+    g.scene.add(head, ghost, box);
+    const tag = document.createElement('div');
+    tag.className = 'peer-tag'; tag.textContent = nameOf(slot); tag.style.setProperty('--c', tint); tag.hidden = true;
+    document.body.appendChild(tag);
+    L = { head, ghost, box, tag };
+    looks.set(slot, L);
+    return L;
+  }
+  function dropLook(slot) {
+    const L = looks.get(slot);
+    if (!L) return;
+    g.scene.remove(L.head, L.ghost, L.box);
+    L.head.dispose(); L.ghost.material.dispose(); L.box.material.dispose(); L.tag.remove();
+    looks.delete(slot);
+  }
   function sendMe() {
     const c = g.camera.position, l = g.controls.target, at = g.ghostAt(), s = g.state;
-    const m = JSON.stringify({ t: 'me', c: [r2(c.x), r2(c.y), r2(c.z)], l: [r2(l.x), r2(l.y), r2(l.z)], g: at ? [s.type.id, s.color, at.x, at.y, at.z, s.rot] : 0 });
-    if (m !== lastMe && link) { lastMe = m; sendText(m); }
+    const m = { t: 'me', c: [r2(c.x), r2(c.y), r2(c.z)], l: [r2(l.x), r2(l.y), r2(l.z)], g: at ? [s.type.id, s.color, at.x, at.y, at.z, s.rot] : 0 };
+    const text = JSON.stringify(m);
+    if (text === lastMe) return;
+    lastMe = text;
+    if (net.guest) toHost(m); else toGuests({ ...m, s: me });
   }
-  function drawPeer(dt) {
-    const m = seen;
-    if (!m || !nums(m.c, 3) || !nums(m.l, 3)) return;
+  function drawPeers(dt) {
+    for (const [slot, m] of seen) if (slot !== me && roster.has(slot)) drawPeer(lookFor(slot), m, dt);
+  }
+  function drawPeer(L, m, dt) {
+    if (!nums(m.c, 3) || !nums(m.l, 3)) return;
+    const { head, ghost, box, tag } = L;
     vA.fromArray(m.c);
-    if (!head.visible) { head.position.copy(vA); head.visible = true; } else head.position.lerp(vA, 1 - Math.exp(-dt * 12));
+    if (!L.placed) { head.position.copy(vA); L.placed = true; } else head.position.lerp(vA, 1 - Math.exp(-dt * 12));
     head.lookAt(vB.fromArray(m.l));
+    head.visible = head.position.distanceToSquared(g.camera.position) > 16; // not when they look from right where we are
     const gh = Array.isArray(m.g) && m.g.length === 6 ? m.g : null, t = gh && g.TYPE_BY_ID[gh[0]];
     if (t && g.COLORS[gh[1]] && nums(gh.slice(2), 4)) {
       const [, color, x, y, z, rot] = gh, [ew, ed] = g.dims(t, rot & 3), H = t.h * g.PLATE;
       vA.set(x + ew / 2, y * g.PLATE, z + ed / 2);
-      pGhost.geometry = g.getGeo(t);
-      pGhostMat.color.set(g.COLORS[color].hex);
-      if (pGhost.visible) pGhost.position.lerp(vA, Math.min(1, dt * 22)); else pGhost.position.copy(vA);
-      pGhost.rotation.y = -(rot & 3) * Math.PI / 2;
-      pBox.position.set(pGhost.position.x, pGhost.position.y + H / 2, pGhost.position.z);
-      pBox.scale.set(ew + 0.08, H + 0.08, ed + 0.08);
-      pGhost.visible = pBox.visible = true;
-    } else pGhost.visible = pBox.visible = false;
+      ghost.geometry = g.getGeo(t);
+      ghost.material.color.set(g.COLORS[color].hex);
+      if (ghost.visible) ghost.position.lerp(vA, Math.min(1, dt * 22)); else ghost.position.copy(vA);
+      ghost.rotation.y = -(rot & 3) * Math.PI / 2;
+      box.position.set(ghost.position.x, ghost.position.y + H / 2, ghost.position.z);
+      box.scale.set(ew + 0.08, H + 0.08, ed + 0.08);
+      ghost.visible = box.visible = true;
+    } else ghost.visible = box.visible = false;
     vA.copy(head.position); vA.y += 1.5; vA.project(g.camera); // name tag just above their head
-    const onScreen = vA.z < 1 && Math.abs(vA.x) < 1.05 && Math.abs(vA.y) < 1.05;
+    const onScreen = head.visible && vA.z < 1 && Math.abs(vA.x) < 1.05 && Math.abs(vA.y) < 1.05;
     tag.hidden = !onScreen;
     if (onScreen) tag.style.transform = `translate(${((vA.x + 1) / 2) * innerWidth}px, ${((1 - vA.y) / 2) * innerHeight}px) translate(-50%, -100%)`;
   }
-  function hidePeer() { head.visible = pGhost.visible = pBox.visible = false; tag.hidden = true; }
 
   /* ───────── Home WiFi: through server.js ───────── */
   function connectLan() {
-    const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/mp`);
-    ws.onopen = () => { tries = 0; link = { send: s => { if (ws.readyState === 1) ws.send(s); } }; };
-    ws.onmessage = e => deliver(e.data);
+    const want = +keep.get('brickyard-slot') || 0; // the same player number as before a reload, if it's free
+    const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/mp${want ? `?want=${want}` : ''}`);
+    const send = s => { if (ws.readyState === 1) ws.send(s); };
+    ws.onopen = () => { tries = 0; lanSend = hostSend = send; };
+    ws.onmessage = e => {
+      const s = String(e.data);
+      if (s.charCodeAt(0) === 64) { const nl = s.indexOf('\n'); deliver(s.slice(nl + 1), +s.slice(1, nl)); } // "@slot\n…": a guest's message for us, the host
+      else deliver(s, 0);
+    };
     ws.onclose = () => {
-      const wasFull = mode === 'full';
-      if (lost()) g.toast('Lost the connection. Playing on your own');
+      const wasFull = mode === 'full', had = roster.size > 1;
+      lanSend = null; alone();
+      if (had) g.toast('Lost the connection. Playing on your own');
       show(wasFull ? 'full' : 'offline');
       setTimeout(connectLan, wasFull ? 5000 : Math.min(8000, 1000 * 2 ** tries++));
     };
   }
 
-  /* ───────── Online: a 4-digit game code, then a direct link between the two browsers ───────── */
-  const keep = { // per tab, so a reload carries on with the same game
-    get: k => { try { return sessionStorage.getItem(k); } catch (e) { return null; } },
-    set: (k, v) => { try { sessionStorage.setItem(k, v); } catch (e) { /* fine */ } },
-    del: k => { try { sessionStorage.removeItem(k); } catch (e) { /* fine */ } },
-  };
-  function useConn(c, onClose) {
-    conn = c;
-    link = { send: s => sendChunks(c, s) };
-    c.on('data', d => { if (conn === c) onData(d); });
-    const done = () => { if (conn !== c) return; conn = null; link = null; onClose(); };
-    c.on('close', done);
-    c.on('error', done);
-  }
-  // Big messages (a whole world) go in pieces; the channel is reliable and in order, so they arrive whole.
+  /* ───────── Online: a 4-digit game code, then a direct link from each guest to the host ───────── */
+  // Big messages (a whole world) go in pieces; each link is reliable and in order, so they arrive whole.
   function sendChunks(c, s) {
     if (!c.open) return;
     if (s.length <= CHUNK) { c.send(s); return; }
     const id = ++msgId, n = Math.ceil(s.length / CHUNK);
     for (let i = 0; i < n; i++) c.send(`\u0001${id},${i},${n},${s.slice(i * CHUNK, (i + 1) * CHUNK)}`);
   }
-  function onData(d) {
-    if (typeof d !== 'string') return;
-    if (d.charCodeAt(0) !== 1) { deliver(d); return; }
-    const a = d.indexOf(','), b = d.indexOf(',', a + 1), c = d.indexOf(',', b + 1);
-    const id = d.slice(1, a), i = +d.slice(a + 1, b), n = +d.slice(b + 1, c), p = pieces[id] || (pieces[id] = { got: 0, bits: [] });
-    if (p.bits[i] === undefined) { p.bits[i] = d.slice(c + 1); p.got++; }
-    if (p.got === n) { delete pieces[id]; deliver(p.bits.join('')); }
+  function chunkReader(take) {
+    const pieces = {};
+    return d => {
+      if (typeof d !== 'string') return;
+      if (d.charCodeAt(0) !== 1) { take(d); return; }
+      const a = d.indexOf(','), b = d.indexOf(',', a + 1), c = d.indexOf(',', b + 1);
+      const id = d.slice(1, a), i = +d.slice(a + 1, b), n = +d.slice(b + 1, c), p = pieces[id] || (pieces[id] = { got: 0, bits: [] });
+      if (p.bits[i] === undefined) { p.bits[i] = d.slice(c + 1); p.got++; }
+      if (p.got === n) { delete pieces[id]; take(p.bits.join('')); }
+    };
   }
   function teardown() {
-    clearTimeout(retryTimer);
-    const c = conn, p = pj;
-    conn = null; pj = null; link = null; pieces = {};
-    if (c) try { c.close(); } catch (e) { /* already gone */ }
+    const p = pj, links = [hostConn, ...guestConns.values()];
+    pj = null; hostConn = null; hostSend = null;
+    guestConns.clear(); guestSends.clear(); guestTabs.clear();
+    for (const c of links) if (c) try { c.close(); } catch (e) { /* already gone */ }
     if (p) try { p.destroy(); } catch (e) { /* already gone */ }
   }
-  async function hostGame(wanted, attempt = 0) {
-    const my = ++gen;
-    teardown();
-    role = 'host'; code = wanted || String(1000 + Math.floor(Math.random() * 9000));
-    show('starting');
+  // Take the game's name on the PeerJS service so friends can find us. Resolves 'ok', 'taken' or 'error'.
+  async function tryHost(c, my) {
     let Peer;
-    try { Peer = await loadPeerJS(); } catch (e) { if (my === gen) giveUp("Couldn't load the online part. Is the internet on?"); return; }
-    if (my !== gen) return;
-    const p = pj = new Peer(ROOM_ID(code));
-    p.on('open', () => { if (pj === p) { keep.set('brickyard-host', code); receive({ t: 'hello', slot: 1, host: true, peer: 0 }); } });
-    p.on('connection', c => c.on('open', () => {
-      if (pj !== p) { c.close(); return; }
-      if (conn) { c.send(JSON.stringify({ t: 'full' })); setTimeout(() => c.close(), 500); return; }
-      useConn(c, () => receive({ t: 'peer', slot: 2, on: false }));
-      receive({ t: 'peer', slot: 2, on: true });
-    }));
-    p.on('disconnected', () => setTimeout(() => { if (pj === p && !p.destroyed) p.reconnect(); }, 2000)); // linked games carry on meanwhile
-    p.on('error', err => {
-      if (pj !== p) return;
-      if (err.type === 'unavailable-id') { // the code is taken, or this tab's game from before a reload hasn't timed out yet
-        if (attempt < 6) setTimeout(() => { if (pj === p) hostGame(wanted && attempt < 3 ? wanted : null, attempt + 1); }, wanted ? 2000 : 0);
-        else giveUp("Couldn't start a game. Try again in a moment");
-      } else if (!conn && !peer) giveUp(err.type === 'browser-incompatible' ? "This browser can't play together" : "Couldn't reach the online service. Is the internet on?");
-    });
-  }
-  async function joinGame(wanted, again = false) {
-    const my = ++gen;
-    teardown();
-    role = 'guest'; code = wanted;
-    show(again ? 'rejoining' : 'joining');
-    let Peer;
-    try { Peer = await loadPeerJS(); } catch (e) { if (my === gen) again ? retryJoin() : giveUp("Couldn't load the online part. Is the internet on?"); return; }
-    if (my !== gen) return;
-    const p = pj = new Peer();
-    const failed = message => { if (pj !== p || conn) return; again ? retryJoin() : giveUp(message); };
-    p.on('open', () => {
-      if (pj !== p) return;
-      const c = p.connect(ROOM_ID(code), { reliable: true, serialization: 'raw' });
-      c.on('open', () => {
-        if (pj !== p) { c.close(); return; }
-        retries = 0; keep.set('brickyard-join', code);
-        if (new URLSearchParams(location.search).has('room')) history.replaceState(null, '', location.pathname);
-        useConn(c, () => { if (lost()) g.toast(`${nameOf(1)} left. Trying to get back in…`); retryJoin(); });
-        receive({ t: 'hello', slot: 2, host: false, peer: 1 });
-        g.toast(`Joined game ${code}`);
+    try { Peer = await loadPeerJS(); } catch (e) { return 'error'; }
+    if (my !== gen) return 'stale';
+    return new Promise(resolve => {
+      const p = pj = new Peer(ROOM_ID(c));
+      let opened = false;
+      const fail = r => { clearTimeout(timer); if (pj === p) pj = null; try { p.destroy(); } catch (e) { /* gone */ } resolve(r); };
+      const timer = setTimeout(() => { if (!opened) fail('error'); }, 20000);
+      p.on('open', () => { if (pj !== p || opened) return; opened = true; clearTimeout(timer); resolve('ok'); });
+      p.on('connection', conn => acceptGuest(p, conn));
+      p.on('disconnected', () => setTimeout(() => { if (pj === p && !p.destroyed) p.reconnect(); }, 2000)); // linked players carry on meanwhile
+      p.on('error', err => {
+        if (pj !== p) return;
+        if (!opened) fail(err.type === 'unavailable-id' ? 'taken' : 'error');
+        else if (err.type === 'unavailable-id') rejoin(c, { canHost: true }); // away so long the game went to another player: join them
       });
-      setTimeout(() => failed("Couldn't connect to that game. Try again"), 15000);
     });
-    p.on('error', err => failed(err.type === 'peer-unavailable' ? `There's no game ${code}. Check the number` : "Couldn't reach the online service. Is the internet on?"));
   }
-  function retryJoin() {
-    if (role !== 'guest') return;
-    if (++retries > 20) { giveUp(`Couldn't get back into game ${code}`); return; }
+  // A browser asks to come into our game: check its version, give it a player number, send it everything.
+  function acceptGuest(p, c) {
+    let slot = 0;
+    const refuse = (m, ms = 800) => {
+      try { c.send(JSON.stringify(m)); } catch (e) { /* gone */ }
+      setTimeout(() => { try { c.close(); } catch (e) { /* gone */ } }, ms);
+    };
+    const older = () => refuse({ t: 'say', m: 'has a newer version of Brickyard. Refresh this page to join' }, 2500);
+    c.on('data', chunkReader(text => {
+      let m; try { m = JSON.parse(text); } catch (e) { return; }
+      if (slot) { if (guestConns.get(slot) === c && m) receive(m, slot); return; }
+      if (pj !== p || net.guest || !m) return;
+      if (m.t !== 'join') { older(); return; } // an older copy of the game, which doesn't introduce itself
+      if (m.v !== PROTOCOL) { refuse({ t: 'old', v: PROTOCOL }); return; }
+      const want = isSlot(m.want) ? m.want : 0, same = !!want && typeof m.tab === 'string' && guestTabs.get(want) === m.tab;
+      slot = same ? want : freeSlot(want);
+      if (!slot) { refuse({ t: 'full' }); return; }
+      if (same) { const stale = guestConns.get(slot); guestConns.delete(slot); try { stale.close(); } catch (e) { /* gone */ } } // the same player on a fresh link
+      guestConns.set(slot, c); guestTabs.set(slot, m.tab);
+      guestSends.set(slot, s => sendChunks(c, s));
+      c.send(JSON.stringify({ t: 'hello', slot, hostSlot: me, roster: [...roster, slot] }));
+      joined(slot, !!m.back || same);
+    }));
+    const gone = () => { if (slot && guestConns.get(slot) === c) left(slot); };
+    c.on('close', gone);
+    c.on('error', gone);
+    setTimeout(() => { if (!slot && c.open) older(); }, 10000);
+  }
+  function freeSlot(want) {
+    if (want && !roster.has(want)) return want;
+    for (let s = 1; s <= MAX_PLAYERS; s++) if (!roster.has(s)) return s;
+    return 0;
+  }
+  // Ask the game's host to let us in. Resolves 'ok', 'missing', 'full', 'old', 'oldhost', 'timeout' or 'error'.
+  async function tryJoin(c, my, back) {
+    let Peer;
+    try { Peer = await loadPeerJS(); } catch (e) { return 'error'; }
+    if (my !== gen) return 'stale';
+    return new Promise(resolve => {
+      const p = pj = new Peer();
+      let settled = false, conn = null;
+      const timer = setTimeout(() => settle('timeout'), 15000);
+      function settle(r, hello) {
+        if (settled) return;
+        settled = true; clearTimeout(timer);
+        if (r === 'ok' && pj === p) {
+          hostConn = conn; hostSend = s => sendChunks(conn, s); heardAt = performance.now();
+          if (new URLSearchParams(location.search).has('room')) history.replaceState(null, '', location.pathname);
+          welcome(hello);
+          resolve('ok');
+          return;
+        }
+        if (pj === p) pj = null;
+        try { p.destroy(); } catch (e) { /* gone */ }
+        resolve(r === 'ok' ? 'stale' : r);
+      }
+      p.on('open', () => {
+        if (pj !== p || settled) return;
+        conn = p.connect(ROOM_ID(c), { reliable: true, serialization: 'raw' });
+        conn.on('open', () => {
+          try { conn.send(JSON.stringify({ t: 'join', v: PROTOCOL, want: +keep.get('brickyard-slot') || 0, tab, back: !!back })); } catch (e) { /* closed again */ }
+        });
+        const read = chunkReader(text => {
+          let m; try { m = JSON.parse(text); } catch (e) { return; }
+          if (!m) return;
+          if (settled) { if (hostConn === conn) receive(m, 0); return; }
+          if (m.t === 'hello') settle('ok', m);
+          else if (m.t === 'full') settle('full');
+          else if (m.t === 'old') settle(m.v > PROTOCOL ? 'old' : 'oldhost');
+          else if (m.t === 'ops' || m.t === 'xf') settle('oldhost'); // an older copy of the game sends the world without a hello
+        });
+        conn.on('data', d => { if (hostConn === conn) heardAt = performance.now(); read(d); }); // each piece of a big world counts
+        const gone = () => { if (!settled) settle('error'); else if (hostConn === conn) hostLost(); };
+        conn.on('close', gone);
+        conn.on('error', gone);
+      });
+      p.on('error', err => { if (!settled) settle(err.type === 'peer-unavailable' ? 'missing' : 'error'); });
+    });
+  }
+  const failText = (r, c) => ({
+    missing: `There's no game ${c}. Check the number`,
+    full: 'That game is full: it has 5 players already',
+    old: 'That game has a newer version of Brickyard. Refresh this page, then join again',
+    oldhost: 'That game has an older version of Brickyard. Ask the others to refresh their page',
+    timeout: "Couldn't connect to that game. Try again",
+  })[r] || "Couldn't reach the online service. Is the internet on?";
+
+  async function startGame() {
+    const my = ++gen;
+    teardown(); show('starting');
+    for (let i = 0; i < 6; i++) {
+      code = String(1000 + Math.floor(Math.random() * 9000));
+      const r = await tryHost(code, my); if (my !== gen) return;
+      if (r === 'ok') { nowHosting(1); return; }
+      if (r !== 'taken') { giveUp(failText(r, code)); return; }
+    }
+    giveUp("Couldn't start a game. Try again in a moment");
+  }
+  function nowHosting(slot) {
+    me = slot; hostSlot = slot;
+    roster.clear(); roster.add(slot);
+    keep.set('brickyard-host', code); keep.del('brickyard-join'); keep.set('brickyard-slot', String(slot));
+    becomeHost(true);
+    lastMe = '';
+    show('in');
+  }
+  async function joinGame(c) {
+    const my = ++gen;
     teardown();
-    show('rejoining');
-    retryTimer = setTimeout(() => joinGame(code, true), 3000);
+    code = c; show('joining');
+    keep.del('brickyard-slot'); // a different game: take whichever player number is free
+    const r = await tryJoin(c, my, false); if (my !== gen) return;
+    if (r === 'ok') g.toast(`Joined game ${c}`);
+    else giveUp(failText(r, c));
+  }
+  // Our link to the host broke: they left, or a network hiccuped. Play on alone for a moment, then find the
+  // game again. The host may still be there; if not, the player with the lowest number starts the game again
+  // under the same code (waiting least) and the others join them.
+  function hostLost() {
+    if (leaving) return;
+    const order = [...roster].filter(s => s !== hostSlot).sort((a, b) => a - b), rank = Math.max(0, order.indexOf(me));
+    alone();
+    g.toast(`Lost touch with game ${code}. Reconnecting…`);
+    rejoin(code, { canHost: true, delay: 300 + rank * 1500 });
+  }
+  // Get back into game `c` after a reload or a lost link. canHost: if nobody has the game any more, start it
+  // again under the same code (the host left, or it was ours before a reload); hostFirst: try that first.
+  async function rejoin(c, { canHost = false, hostFirst = false, delay = 0 } = {}) {
+    const my = ++gen;
+    teardown();
+    code = c; show('rejoining');
+    if (delay) { await wait(delay); if (my !== gen) return; }
+    let hostNext = hostFirst;
+    for (let i = 0; i < 24; i++) {
+      if (hostNext) {
+        const r = await tryHost(c, my); if (my !== gen) return;
+        if (r === 'ok') { nowHosting(me || +keep.get('brickyard-slot') || 1); g.toast(`Back in game ${c}`); return; }
+        hostNext = false; // someone has it: join them
+        await wait(r === 'taken' ? 400 : 2500); if (my !== gen) return;
+        continue;
+      }
+      const r = await tryJoin(c, my, true); if (my !== gen) return;
+      if (r === 'ok') { g.toast(`Back in game ${c}`); return; }
+      if (r === 'full' || r === 'old' || r === 'oldhost') { giveUp(failText(r, c)); return; }
+      if (r === 'missing' && canHost) { hostNext = true; continue; }
+      await wait(2500); if (my !== gen) return;
+    }
+    giveUp(`Couldn't get back into game ${c}`);
   }
   function giveUp(message) {
     if (message) g.toast(message);
@@ -385,25 +591,43 @@ function run(g, info) {
   }
   function leaveGame() {
     gen++;
-    const together = peer || net.guest;
-    teardown(); role = ''; code = ''; retries = 0;
-    keep.del('brickyard-host'); keep.del('brickyard-join');
-    if (together) { setPeer(0); becomeHost(true); }
+    teardown();
+    code = ''; me = 0; hostSlot = 0;
+    alone();
+    keep.del('brickyard-host'); keep.del('brickyard-join'); keep.del('brickyard-slot');
     show('idle');
   }
+  // Pick up where this tab left off: a shared link (?room=1234) joins, a reload rejoins or re-hosts its game.
+  function resume() {
+    const fromLink = new URLSearchParams(location.search).get('room'), hosted = keep.get('brickyard-host'), was = keep.get('brickyard-join');
+    if (/^\d{4}$/.test(fromLink || '') && fromLink !== hosted && fromLink !== was) joinGame(fromLink);
+    else if (hosted) rejoin(hosted, { canHost: true, hostFirst: true });
+    else if (was) rejoin(was);
+    else show('idle');
+  }
+  // A host that vanishes without a goodbye (a phone locked, a browser closed in a hurry) leaves its links open
+  // for a long time, so the host says something every 2 seconds and guests take 10 silent seconds as gone.
+  setInterval(() => {
+    if (lan) return; // play-together.bat's server keeps watch there
+    if (!net.guest && guestConns.size) toGuests({ t: 'hb' });
+    else if (net.guest && hostConn && performance.now() - heardAt > 10000) hostLost();
+  }, 2000);
+  // Leaving the page: say goodbye at once, so the others don't wait to notice. (Back/forward can bring it back.)
+  addEventListener('pagehide', () => { leaving = true; if (!lan) teardown(); });
+  addEventListener('pageshow', e => { leaving = false; if (e.persisted && !lan) { alone(); resume(); } });
 
   /* ───────── The "Play together" chip and its panel ───────── */
   const ui = {
-    btn: $('mpBtn'), text: $('mpText'), dots: $('mpBtn').querySelectorAll('.dots i'), note: $('mpNote'), addr: $('mpAddr'), copy: $('mpCopy'),
-    start: $('mpStart'), joinForm: $('mpJoinForm'), code: $('mpCode'), leave: $('mpLeave'), foot: $('mpFoot'),
+    btn: $('mpBtn'), text: $('mpText'), dots: $('mpBtn').querySelector('.dots'), note: $('mpNote'), addr: $('mpAddr'), who: $('mpWho'),
+    copy: $('mpCopy'), start: $('mpStart'), joinForm: $('mpJoinForm'), code: $('mpCode'), leave: $('mpLeave'), foot: $('mpFoot'),
   };
-  // Home WiFi: the address the other device opens, on the network play-together.bat is using.
+  // Home WiFi: the address other devices open, on the network play-together.bat is using.
   const onThisPc = /^(localhost|127\.|\[::1\]$)/.test(location.hostname), net0 = lan && info.addresses[0];
   const lanUrl = lan && (onThisPc ? net0 && `http://${net0.address}:${info.port}` : location.origin);
   const onNet = net0 ? ` connected to ${net0.name}` : ' on the same network';
   ui.btn.hidden = false;
   ui.btn.onclick = () => g.togglePop('mp');
-  ui.start.onclick = () => hostGame();
+  ui.start.onclick = () => startGame();
   ui.leave.onclick = () => leaveGame();
   ui.joinForm.onsubmit = e => {
     e.preventDefault();
@@ -415,47 +639,50 @@ function run(g, info) {
   ui.copy.onclick = () => {
     if (lan) { copyText(lanUrl).then(() => g.toast('Address copied'), () => g.toast("Couldn't copy. Type the address instead")); return; }
     const url = `${location.origin}${location.pathname}?room=${code}`;
-    if (navigator.share) navigator.share({ title: 'Brickyard', text: `Come build with me in Brickyard. Game ${code}`, url }).catch(() => {});
-    else copyText(url).then(() => g.toast('Link copied'), () => g.toast(`Couldn't copy. The code is ${code}`));
+    if (navigator.share) navigator.share({ title: 'Brickyard', text: `Come build with me in Brickyard! Game ${code}`, url }).catch(() => {});
+    else copyText(url).then(() => g.toast('Invite link copied. Send it to your friends'), () => g.toast(`Couldn't copy. The code is ${code}`));
   };
-  function show(m) {
-    mode = m;
-    ui.btn.dataset.state = m === 'waiting' ? 'alone' : m;
-    ui.text.textContent = {
-      connecting: 'Connecting…', alone: 'Waiting for a friend', offline: 'Offline', full: 'Game is full', together: `With ${nameOf(peer)}`,
-      idle: 'Play together', starting: 'Starting…', waiting: `Game ${code}`, joining: 'Joining…', rejoining: 'Reconnecting…',
-    }[m];
-    const live = m === 'alone' || m === 'waiting' || m === 'together';
-    ui.dots[0].style.setProperty('--c', me && live ? TINT[me] : '');
-    ui.dots[1].style.setProperty('--c', m === 'together' ? TINT[peer] : '');
+  function show(m) { mode = m; updateUi(); }
+  function updateUi() {
+    const n = roster.size, inGame = mode === 'in', together = inGame && n > 1, room = n < MAX_PLAYERS;
+    const slots = [...roster].sort((a, b) => a - b);
+    ui.btn.dataset.state = inGame ? (together ? 'together' : 'alone') : mode;
+    ui.text.textContent = together ? `${n} players` : inGame ? (lan ? 'Waiting for friends' : `Game ${code}`) : {
+      connecting: 'Connecting…', offline: 'Offline', full: 'Game is full', idle: 'Play together', starting: 'Starting…', joining: 'Joining…', rejoining: 'Reconnecting…',
+    }[mode] || '';
+    ui.dots.replaceChildren(...(inGame ? slots : [0, 0]).map(s => { const i = document.createElement('i'); if (s) i.style.setProperty('--c', TINT[s]); return i; }));
+    ui.who.hidden = !inGame;
+    ui.who.replaceChildren(...(inGame ? slots : []).map(s => {
+      const b = document.createElement('span');
+      b.style.setProperty('--c', TINT[s]); b.textContent = s === me ? `${nameOf(s)} (you)` : nameOf(s);
+      return b;
+    }));
     if (lan) {
-      ui.note.textContent = {
-        connecting: 'Connecting to the play-together window…',
-        alone: `You're ${nameOf(me)}. Your friend opens this on another device${onNet}:`,
-        together: `You're ${nameOf(me)}, building with ${nameOf(peer)}. To join again, open this on a device${onNet}:`,
-        offline: "Can't reach the play-together window. Is it still open? Trying again…",
-        full: 'Two people are already playing. You’ll join when one of them leaves.',
-      }[m];
-      ui.addr.hidden = false; ui.addr.textContent = lanUrl || 'Only this computer can play. Run play-together.bat again once you’re on a network.';
-      ui.copy.hidden = !lanUrl; ui.copy.textContent = 'Copy address';
+      ui.note.textContent = inGame
+        ? (room ? `You're ${nameOf(me)}. ${together ? 'More friends' : 'Up to 4 friends'} can join: they open this on a device${onNet}:` : `You're ${nameOf(me)}. The game is full: 5 players.`)
+        : {
+          connecting: 'Connecting to the play-together window…',
+          offline: "Can't reach the play-together window. Is it still open? Trying again…",
+          full: 'Five people are already playing. You’ll join when one of them leaves.',
+        }[mode] || '';
+      ui.addr.hidden = !(inGame && room); ui.addr.textContent = lanUrl || 'Only this computer can play. Run play-together.bat again once you’re on a network.';
+      ui.copy.hidden = !(inGame && room && lanUrl); ui.copy.textContent = 'Copy address';
       ui.start.hidden = ui.joinForm.hidden = ui.leave.hidden = true;
       ui.foot.textContent = 'Keep the play-together window open while you play. Undo is shared: it takes back the last change, whoever made it.';
       return;
     }
-    const hosting = role === 'host';
-    ui.note.textContent = {
-      idle: 'Build with someone on another iPad, phone or computer. Both need the internet. Start a game, or type a friend’s game code:',
-      starting: 'Starting a game…',
-      waiting: 'Your game code. On the other device, tap Play together and type it in:',
-      joining: `Joining game ${code}…`,
-      rejoining: `Lost the other player. Trying to get back into game ${code}…`,
-      together: hosting ? `You're ${nameOf(me)}, building with ${nameOf(peer)} in game ${code}.` : `You're ${nameOf(me)}, building with ${nameOf(peer)}.`,
-    }[m];
-    ui.addr.hidden = m !== 'waiting'; ui.addr.textContent = code; ui.addr.classList.add('code');
-    ui.copy.hidden = !(m === 'waiting' || (m === 'together' && hosting)); ui.copy.textContent = navigator.share ? 'Share link' : 'Copy link';
-    ui.start.hidden = ui.joinForm.hidden = m !== 'idle';
-    ui.leave.hidden = m === 'idle';
-    ui.leave.textContent = m === 'together' ? 'Leave game' : m === 'waiting' ? 'End game' : 'Cancel';
+    ui.note.textContent = inGame
+      ? (!together ? 'Your game is ready. Friends can join from anywhere, on any WiFi or mobile data: send them an invite, or they tap Play together and type this code:'
+        : room ? `You're ${nameOf(me)}. More friends can join with this code, up to 5 players:` : `You're ${nameOf(me)}. The game is full: 5 players.`)
+      : {
+        idle: 'Build with up to 4 friends on any iPad, phone or computer. They can be anywhere: everyone just needs the internet. Start a game, or type a friend’s game code:',
+        starting: 'Starting a game…', joining: `Joining game ${code}…`, rejoining: `Getting back into game ${code}…`,
+      }[mode] || '';
+    ui.addr.hidden = !inGame; ui.addr.textContent = code; ui.addr.classList.add('code');
+    ui.copy.hidden = !(inGame && room); ui.copy.textContent = navigator.share ? 'Invite friends' : 'Copy invite link';
+    ui.start.hidden = ui.joinForm.hidden = mode !== 'idle';
+    ui.leave.hidden = mode === 'idle';
+    ui.leave.textContent = inGame ? (together ? 'Leave game' : 'End game') : 'Cancel';
     ui.foot.textContent = 'Undo is shared: it takes back the last change, whoever made it.';
   }
   function copyText(s) {
@@ -468,28 +695,26 @@ function run(g, info) {
   }
 
   if (lan) { show('connecting'); connectLan(); return; }
-  // Online: a shared link (?room=1234) joins straight away; a reload rejoins or re-hosts the same game.
-  const fromLink = new URLSearchParams(location.search).get('room'), hosted = keep.get('brickyard-host'), joined = keep.get('brickyard-join');
-  if (/^\d{4}$/.test(fromLink || '') && fromLink !== hosted) joinGame(fromLink);
-  else if (hosted) hostGame(hosted);
-  else if (joined) joinGame(joined, true);
-  else show('idle');
+  resume();
 }
 
-// A LEGO minifig head that faces where the other player is looking.
-function minifigHead(THREE) {
-  const head = new THREE.Group(), skin = new THREE.MeshStandardMaterial({ roughness: 0.35 }), ink = new THREE.MeshBasicMaterial({ color: 0x1b2a34 });
-  const face = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.62, 32), skin);
-  const stud = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.16, 24), skin);
+// A LEGO minifig head in a player's color, facing where they're looking.
+let headParts = null;
+function minifigHead(THREE, tint) {
+  headParts ||= {
+    face: new THREE.CylinderGeometry(0.5, 0.5, 0.62, 32), stud: new THREE.CylinderGeometry(0.26, 0.26, 0.16, 24),
+    eye: new THREE.SphereGeometry(0.055, 12, 8), smile: new THREE.TorusGeometry(0.17, 0.022, 8, 24, Math.PI),
+  };
+  const head = new THREE.Group(), skin = new THREE.MeshStandardMaterial({ color: tint, roughness: 0.35 }), ink = new THREE.MeshBasicMaterial({ color: 0x1b2a34 });
+  const stud = new THREE.Mesh(headParts.stud, skin);
   stud.position.y = 0.39;
-  head.add(face, stud);
-  const eye = new THREE.SphereGeometry(0.055, 12, 8);
-  for (const x of [-0.16, 0.16]) { const e = new THREE.Mesh(eye, ink); e.position.set(x, 0.08, 0.49); e.scale.z = 0.4; head.add(e); }
-  const smile = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.022, 8, 24, Math.PI), ink);
+  head.add(new THREE.Mesh(headParts.face, skin), stud);
+  for (const x of [-0.16, 0.16]) { const e = new THREE.Mesh(headParts.eye, ink); e.position.set(x, 0.08, 0.49); e.scale.z = 0.4; head.add(e); }
+  const smile = new THREE.Mesh(headParts.smile, ink);
   smile.rotation.z = Math.PI; smile.position.set(0, -0.02, 0.495);
   head.add(smile);
   head.traverse(o => { o.raycast = () => {}; });
   head.scale.setScalar(2.2); // big enough to spot from across the baseplate
-  head.skin = skin;
+  head.dispose = () => { skin.dispose(); ink.dispose(); };
   return head;
 }

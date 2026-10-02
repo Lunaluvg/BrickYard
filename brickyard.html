@@ -176,6 +176,10 @@ svg.i{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.9;
 .mp-join input:focus{outline:2px solid var(--accent); outline-offset:1px}
 .mp-join .wide{width:auto; padding:10px 18px}
 #mpLeave{margin-top:8px}
+.mp-who{display:flex; flex-wrap:wrap; gap:6px; margin:0 0 10px}
+.mp-who[hidden]{display:none}
+.mp-who span{display:inline-flex; align-items:center; gap:6px; padding:4px 10px 4px 7px; border-radius:999px; background:var(--hover); font-weight:600; font-size:12.5px; white-space:nowrap}
+.mp-who span::before{content:""; width:11px; height:11px; border-radius:50%; background:var(--c); box-shadow:inset 0 -1.5px 0 rgba(0,0,0,.2)}
 
 /* touch: the pad for nudging and placing a part */
 .place-bar{bottom:calc(78px + var(--safe-b)); left:50%; transform:translateX(-50%); border-radius:var(--r-lg); padding:8px; display:flex; align-items:center; gap:10px; z-index:5}
@@ -328,6 +332,7 @@ body.placing #toast{bottom:calc(196px + var(--safe-b))}
   <h3>Play together</h3>
   <p class="note" id="mpNote"></p>
   <div class="mp-addr" id="mpAddr" hidden></div>
+  <div class="mp-who" id="mpWho" hidden aria-label="Players"></div>
   <button class="wide" id="mpCopy" hidden>Copy address</button>
   <button class="wide mp-main" id="mpStart" hidden>Start a game</button>
   <form class="mp-join" id="mpJoinForm" hidden><input id="mpCode" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder="Code" aria-label="Game code"><button class="wide" id="mpJoin">Join</button></form>
@@ -377,7 +382,7 @@ body.placing #toast{bottom:calc(196px + var(--safe-b))}
       <tr><td>Next part or color</td><td>, and . for parts, [ and ] for colors</td></tr>
       <tr><td>Camera</td><td>Drag to orbit, right-drag to pan, scroll to zoom, F to reset</td></tr>
       <tr><td>Touch screens</td><td>Tap to choose a spot, then tap the part again or press Place. The arrows move it one stud, and you can drag it to slide it. Pinch to zoom</td></tr>
-      <tr><td>Play together</td><td>Tap Play together at the top: one player starts a game, the other joins with its code. Or run play-together.bat to play over your own WiFi</td></tr>
+      <tr><td>Play together</td><td>Up to 5 players. Tap Play together at the top: one player starts a game, and friends join with its code or an invite link from anywhere with internet. Or run play-together.bat to play over your own WiFi</td></tr>
       <tr><td>Undo, redo</td><td>Ctrl+Z, Ctrl+Y. Undo also rebuilds what you knocked down</td></tr>
     </table>
     <button class="close" id="helpClose">Start building</button>
@@ -409,8 +414,8 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 const $ = id => document.getElementById(id);
 
 /* ───────────────────────── Constants ───────────────────────── */
-// Real brick proportions: stud pitch 8 mm = 1 unit, plate 3.2 mm = 0.4, brick = 3 plates.
-const PLATE = 0.4, GRID = 32, HALF = GRID / 2, MAXY = 120;
+// Real brick proportions: stud pitch 8 mm = 1 unit, plate 3.2 mm = 0.4, brick = 3 plates. The board is 64×64 studs.
+const PLATE = 0.4, GRID = 64, HALF = GRID / 2, MAXY = 120;
 const STUD_R = 0.3, STUD_H = 0.2, GAP = 0.02;
 const STORE_KEY = 'brickyard-model-v2', OLD_KEY = 'brickyard-model-v1', HELP_KEY = 'brickyard-seen-help-2', GFX_KEY = 'brickyard-graphics';
 const GRAVITY = 40, MAX_SPEED = 110;
@@ -507,14 +512,14 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { ma
 
 const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 0.1, 500);
 const HOME = { pos: new THREE.Vector3(), target: new THREE.Vector3(0, 1, 0) };
-function homeFit() { HOME.pos.set(24, 24, 28).multiplyScalar(camera.aspect < 1 ? Math.min(1.9, 1.15 / camera.aspect) : 1); }
+function homeFit() { HOME.pos.set(28, 27, 33).multiplyScalar(camera.aspect < 1 ? Math.min(1.9, 1.15 / camera.aspect) : 1); }
 homeFit(); camera.position.copy(HOME.pos);
 
 const controls = new OrbitControls(camera, canvas);
 controls.target.copy(HOME.target);
 controls.enableDamping = true; controls.dampingFactor = 0.09;
 controls.maxPolarAngle = Math.PI * 0.485;
-controls.minDistance = 5; controls.maxDistance = 95;
+controls.minDistance = 5; controls.maxDistance = 140;
 controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
 controls.update();
 
@@ -526,6 +531,42 @@ sun.shadow.mapSize.set(2048, 2048);
 Object.assign(sun.shadow.camera, { left: -26, right: 26, top: 26, bottom: -26, near: 1, far: 90 });
 sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.025;
 scene.add(sun);
+// The sun's shadows cover just the part of the board in view, so they stay sharp on a big board wherever you look.
+const SUN_DIR = sun.position.clone().normalize(), sunAt = new THREE.Vector3(), sunView = new THREE.OrthographicCamera();
+const ground = new THREE.Plane(UP.clone(), 0), fitRay = new THREE.Ray(), fitDir = new THREE.Vector3(), fitP = new THREE.Vector3();
+let shadowKey = '';
+function fitShadow() {
+  if (!sun.castShadow) return;
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity; // where the corners of the view meet the board
+  for (const [nx, ny] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+    fitDir.set(nx, ny, 0.5).unproject(camera).sub(camera.position).normalize();
+    if (!fitRay.set(camera.position, fitDir).intersectPlane(ground, fitP) || fitP.distanceTo(camera.position) > 300)
+      fitP.copy(camera.position).addScaledVector(fitDir, 300); // above the horizon: as far as the board goes
+    const x = THREE.MathUtils.clamp(fitP.x, -HALF - 3, HALF + 3), z = THREE.MathUtils.clamp(fitP.z, -HALF - 3, HALF + 3);
+    x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z);
+  }
+  sunAt.set(Math.round((x0 + x1) / 4) * 2, 0, Math.round((z0 + z1) / 4) * 2); // in steps, so shadows don't shimmer as you move
+  sunView.position.copy(sunAt).addScaledVector(SUN_DIR, 110); sunView.lookAt(sunAt); sunView.updateMatrixWorld();
+  let l = Infinity, r = -Infinity, b = Infinity, t = -Infinity;
+  for (const x of [x0, x1]) for (const y of [0, 14]) for (const z of [z0, z1]) { // up to tall builds' tops
+    fitP.set(x, y, z).applyMatrix4(sunView.matrixWorldInverse);
+    l = Math.min(l, fitP.x); r = Math.max(r, fitP.x); b = Math.min(b, fitP.y); t = Math.max(t, fitP.y);
+  }
+  [l, r, b, t] = [Math.floor(l), Math.ceil(r), Math.floor(b), Math.ceil(t)];
+  const key = `${sunAt.x},${sunAt.z},${l},${r},${b},${t}`;
+  if (key === shadowKey) return;
+  shadowKey = key;
+  sun.position.copy(sunView.position); sun.target.position.copy(sunAt); sun.target.updateMatrixWorld();
+  Object.assign(sun.shadow.camera, { left: l, right: r, bottom: b, top: t, near: 1, far: 230 });
+  sun.shadow.camera.updateProjectionMatrix();
+}
+// Panning stops at the board's edge, so a big board can't slide away off screen.
+function keepOnBoard() {
+  const t = controls.target, x = THREE.MathUtils.clamp(t.x, -HALF, HALF), y = THREE.MathUtils.clamp(t.y, 0, 30), z = THREE.MathUtils.clamp(t.z, -HALF, HALF);
+  if (x === t.x && y === t.y && z === t.z) return;
+  camera.position.x += x - t.x; camera.position.y += y - t.y; camera.position.z += z - t.z;
+  t.set(x, y, z);
+}
 const rim = new THREE.DirectionalLight(0xd8e4ff, 0.7);
 rim.position.set(-20, 14, -18); scene.add(rim);
 
@@ -662,11 +703,26 @@ const studLods = new Map(); // baseplate studs at each graphics level's detail
 const studsFor = seg => { if (!studLods.has(seg)) studLods.set(seg, studGeo(seg)); return studLods.get(seg); };
 const baseBody = new THREE.Mesh(new RoundedBoxGeometry(GRID, 0.24, GRID, 2, 0.08), baseMat);
 baseBody.position.y = -0.12; baseBody.receiveShadow = true; baseBody.castShadow = true; scene.add(baseBody);
-const baseStuds = new THREE.InstancedMesh(studsFor(24), baseMat, GRID * GRID);
+// The board's studs come in 16×16 tiles, so tiles out of view are skipped and far-off ones get plainer studs.
+const TILE = 16, baseTiles = [];
 {
-  const m = new THREE.Matrix4(); let n = 0;
-  for (let x = -HALF; x < HALF; x++) for (let z = -HALF; z < HALF; z++) { m.makeTranslation(x + 0.5, 0, z + 0.5); baseStuds.setMatrixAt(n++, m); }
-  baseStuds.castShadow = true; baseStuds.receiveShadow = true; scene.add(baseStuds);
+  const m = new THREE.Matrix4();
+  for (let tx = -HALF; tx < HALF; tx += TILE) for (let tz = -HALF; tz < HALF; tz += TILE) {
+    const tile = new THREE.InstancedMesh(studsFor(24), baseMat, TILE * TILE);
+    let n = 0;
+    for (let x = tx; x < tx + TILE; x++) for (let z = tz; z < tz + TILE; z++) { m.makeTranslation(x + 0.5, 0, z + 0.5); tile.setMatrixAt(n++, m); }
+    tile.computeBoundingSphere();
+    tile.castShadow = tile.receiveShadow = true;
+    tile.userData.mid = new THREE.Vector3(tx + TILE / 2, 0, tz + TILE / 2);
+    scene.add(tile); baseTiles.push(tile);
+  }
+}
+function studDetail() { // a stud far away is a few pixels across
+  const top = QUALITY[state.quality].studs, mid = Math.max(8, Math.round(top / 2));
+  for (const tile of baseTiles) {
+    const d = camera.position.distanceTo(tile.userData.mid) - TILE * 0.7;
+    tile.geometry = studsFor(d < 26 ? top : d < 56 ? mid : 6);
+  }
 }
 
 /* ───────────────────────── Physics world ───────────────────────── */
@@ -700,7 +756,7 @@ const debris = new Map();      // body.id → chunk { body, group, parts, links 
 const debrisParts = new Map(); // brick id → part (inside a chunk)
 let nextId = 1;
 const state = { tool: 'build', type: TYPE_BY_ID.b2x4, color: 0, rot: 0, turns: 0, sound: true, base: 0, clutch: 1, slowmo: false, quality: 2 };
-// Two players: js/multiplayer.js takes these over when server.js serves the game. The host's changes to the
+// Playing together: js/multiplayer.js takes these over when the game is served over http(s). The host's changes to the
 // world go out as ops (net.op); a guest's actions go to the host as commands (net.cmd) instead of happening here.
 const net = { guest: false, remoteSlow: false, canUndo: false, canRedo: false, op() {}, cmd() {}, say() {}, frame() {} };
 const chunks = new Map(); // network id → loose chunk, so both screens can name the same piece
@@ -2202,7 +2258,7 @@ function setQuality(i) {
   if (sun.shadow.map && sun.shadow.mapSize.x !== q.shadow) { sun.shadow.map.dispose(); sun.shadow.map = null; }
   if (q.shadow) sun.shadow.mapSize.set(q.shadow, q.shadow);
   flash.visible = q.rich;
-  baseStuds.geometry = studsFor(q.studs);
+  studDetail(); shadowKey = '';
   [baseMat, ...matCache.values()].forEach(tuneMat);
   // Shadow and shine changes need fresh shaders, including for parts that aren't on screen right now.
   const all = new Set([eraseMat, ...matCache.values(), ...heldMats.values(), ...bandMats.values()]);
@@ -2374,7 +2430,7 @@ function loop(now) {
     controls.target.lerpVectors(camTween.q0, HOME.target, e);
     if (k >= 1) camTween = null;
   }
-  controls.update();
+  controls.update(); keepOnBoard(); studDetail(); fitShadow();
   const awake = net.guest ? false : stepPhysics(dt); // a guest's loose pieces move to the host's positions instead
   updateFuses(now, sdt);
   if (awake) { hoverDirty = true; updateCounts(); }
@@ -2418,8 +2474,8 @@ requestAnimationFrame(loop);
 window.__brickyard = { state, bricks, debris, world, camera };
 window.__brickyardReady = true;
 
-// Two players: when server.js serves the game, js/multiplayer.js links this browser with the other one.
-// Opened as a plain file there's no server, so the game stays solo.
+// Playing together: served over http(s) (the website, or play-together.bat), js/multiplayer.js links this
+// browser with up to four others. Opened as a plain file, the game stays solo.
 if (location.protocol.startsWith('http')) {
   const game = {
     THREE, scene, camera, controls, state, net, bricks, debris, debrisParts, chunks, brokenLinks, fuses, undoStack, redoStack,

@@ -1,5 +1,5 @@
 @echo off
-rem Starts Brickyard for two players on the same WiFi. Keep this window open while you play.
+rem Starts Brickyard for up to five players on the same WiFi. Keep this window open while you play.
 title Brickyard - play together
 cd /d "%~dp0"
 where node >nul 2>nul

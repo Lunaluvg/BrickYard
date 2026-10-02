@@ -1,5 +1,5 @@
-// Brickyard two-player server. Serves the game to both devices on one network you pick, and passes
-// messages between the two players. No installs: only Node's built-in modules.
+// Brickyard play-together server. Serves the game to devices on one network you pick, and passes
+// messages between up to five players. No installs: only Node's built-in modules.
 // Start it with play-together.bat, or: node server.js [--network NAME] [--choose] [--port 8080] [--no-open]
 'use strict';
 const http = require('http');
@@ -15,6 +15,7 @@ const args = process.argv.slice(2), arg = name => (args.includes(name) ? args[ar
 const START_PORT = +arg('--port') || +process.env.PORT || 8080;
 const OPEN = !args.includes('--no-open');
 const MAX_MESSAGE = 16 * 1024 * 1024;
+const MAX_PLAYERS = 5;
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg',
@@ -95,7 +96,7 @@ function serve(req, res) {
   });
 }
 
-/* ───────────── WebSocket (RFC 6455, just what two browsers need) ───────────── */
+/* ───────────── WebSocket (RFC 6455, just what the browsers need) ───────────── */
 function frame(op, payload = Buffer.alloc(0)) {
   const n = payload.length;
   let head;
@@ -134,34 +135,52 @@ function reader(p) {
   };
 }
 
-/* ───────────── The game: two players, the first one in hosts ───────────── */
+/* ───────────── The game: up to five players, the first one in hosts ───────────── */
+// The host's browser runs the game. A guest's messages go to the host, marked "@slot\n" so it knows who sent
+// them; the host's go to every guest, or to just one when they start with "@slot\n".
 const players = [], turnedAway = new Set();
-const other = p => players.find(q => q !== p);
+const hostOf = () => players.find(q => q.host);
 const tell = (p, msg) => { if (!p.sock.destroyed) p.sock.write(frame(1, Buffer.from(JSON.stringify(msg)))); };
-function relay(from, text) { const to = other(from); if (to && !to.sock.destroyed) to.sock.write(frame(1, text)); }
+function relay(from, data) {
+  if (!from.host) {
+    const h = hostOf();
+    if (h && !h.sock.destroyed) h.sock.write(frame(1, Buffer.concat([Buffer.from(`@${from.slot}\n`), data])));
+    return;
+  }
+  if (data[0] === 0x40) { // "@slot\n…"
+    const nl = data.indexOf(0x0a), to = nl > 1 && players.find(q => q.slot === +data.subarray(1, nl).toString());
+    if (to && to !== from && !to.sock.destroyed) to.sock.write(frame(1, data.subarray(nl + 1)));
+    return;
+  }
+  const f = frame(1, data);
+  for (const q of players) if (q !== from && !q.sock.destroyed) q.sock.write(f);
+}
 
 function upgrade(req, sock) {
-  const key = req.headers['sec-websocket-key'];
-  if (new URL(req.url, 'http://x').pathname !== '/mp' || !key || (req.headers.upgrade || '').toLowerCase() !== 'websocket') { sock.destroy(); return; }
+  const key = req.headers['sec-websocket-key'], url = new URL(req.url, 'http://x');
+  if (url.pathname !== '/mp' || !key || (req.headers.upgrade || '').toLowerCase() !== 'websocket') { sock.destroy(); return; }
   const accept = crypto.createHash('sha1').update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
   sock.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ' + accept + '\r\n\r\n');
   sock.setNoDelay(true);
   const from = String(sock.remoteAddress || '').replace(/^::ffff:/, '');
-  if (players.length >= 2) {
+  if (players.length >= MAX_PLAYERS) {
     sock.end(frame(1, Buffer.from(JSON.stringify({ t: 'full' }))));
-    if (!turnedAway.has(from)) { turnedAway.add(from); console.log(`  A third player (${from}) is waiting: the game is full`); }
+    if (!turnedAway.has(from)) { turnedAway.add(from); console.log(`  Someone else (${from}) is waiting: the game is full with ${MAX_PLAYERS} players`); }
     return;
   }
   turnedAway.delete(from);
-  const p = { sock, slot: players.some(q => q.slot === 1) ? 2 : 1, host: !players.length, alive: true };
+  // A player who reloads asks for their old number back.
+  const used = new Set(players.map(q => q.slot)), want = +url.searchParams.get('want');
+  let slot = want >= 1 && want <= MAX_PLAYERS && !used.has(want) ? want : 1;
+  while (used.has(slot)) slot++;
+  const p = { sock, slot, host: !hostOf(), alive: true };
   players.push(p);
   sock.on('data', reader(p));
   sock.on('close', () => leave(p));
   sock.on('error', () => leave(p));
-  const q = other(p);
-  tell(p, { t: 'hello', slot: p.slot, host: p.host, peer: q ? q.slot : 0 });
-  if (q) tell(q, { t: 'peer', slot: p.slot, on: true });
-  console.log(`  Player ${p.slot} joined from ${from}${p.host ? ' (hosting)' : ''}`);
+  tell(p, { t: 'hello', slot: p.slot, hostSlot: hostOf().slot, roster: players.map(q => q.slot) });
+  for (const q of players) if (q !== p) tell(q, { t: 'peer', slot: p.slot, on: true });
+  console.log(`  Player ${p.slot} joined from ${from}${p.host ? ' (hosting)' : ''}. Players: ${players.length} of ${MAX_PLAYERS}`);
 }
 function leave(p) {
   const i = players.indexOf(p);
@@ -169,10 +188,13 @@ function leave(p) {
   players.splice(i, 1);
   p.sock.destroy();
   console.log(`  Player ${p.slot} left`);
-  const q = players[0];
-  if (!q) return;
-  tell(q, { t: 'peer', slot: p.slot, on: false });
-  if (p.host) { q.host = true; tell(q, { t: 'host' }); }
+  for (const q of players) tell(q, { t: 'peer', slot: p.slot, on: false });
+  if (p.host && players.length) { // the next player takes over and sends everyone its copy of the world
+    const h = players.reduce((a, b) => (b.slot < a.slot ? b : a));
+    h.host = true;
+    for (const q of players) tell(q, { t: 'host', slot: h.slot });
+    console.log(`  Player ${h.slot} is hosting now`);
+  }
 }
 // A phone that falls asleep never says goodbye, so ping now and then and drop anyone who stops answering.
 setInterval(() => {
@@ -221,10 +243,10 @@ function openBrowser(url) {
     if (chosen) {
       console.log(`\n  Brickyard is ready to play together on ${chosen.name}.\n`);
       console.log(`  On this computer:     ${local}`);
-      console.log(`  On the other device:  http://${chosen.address}:${port}\n`);
-      console.log(`  The other device has to be connected to ${chosen.name}. Keep this window open while you play.`);
+      console.log(`  On other devices:     http://${chosen.address}:${port}\n`);
+      console.log(`  Up to ${MAX_PLAYERS} players. The other devices have to be connected to ${chosen.name}. Keep this window open while you play.`);
       console.log('  To play on a different network: play-together.bat --choose');
-      console.log("  If the other device can't connect: when Windows asks, let Node.js use Public networks too.\n");
+      console.log("  If the other devices can't connect: when Windows asks, let Node.js use Public networks too.\n");
     } else {
       console.log(`\n  No network picked, so only this computer can play: ${local}`);
       console.log('  Connect to a WiFi or plug in your phone, then run play-together.bat again.\n');
