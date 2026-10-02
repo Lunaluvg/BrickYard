@@ -151,7 +151,7 @@ svg.i{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.9;
 .power.on{display:block}
 .badge{position:fixed; top:calc(76px + var(--safe-t)); left:50%; transform:translateX(-50%); background:var(--ink); color:var(--paper-solid); font-weight:600; font-size:12.5px; padding:5px 12px; border-radius:999px; z-index:3; pointer-events:none}
 .badge[hidden]{display:none}
-#toast{position:fixed; left:50%; bottom:calc(84px + var(--safe-b)); transform:translate(-50%,8px); background:var(--ink); color:var(--paper-solid); font-weight:600; padding:9px 16px; border-radius:999px; opacity:0; pointer-events:none; transition:opacity .2s, transform .2s; white-space:nowrap; z-index:20}
+#toast{position:fixed; left:50%; bottom:calc(84px + var(--safe-b)); transform:translate(-50%,8px); background:var(--ink); color:var(--paper-solid); font-weight:600; padding:9px 16px; border-radius:18px; opacity:0; pointer-events:none; transition:opacity .2s, transform .2s; width:max-content; max-width:min(540px, calc(100vw - 32px)); text-align:center; z-index:20}
 #toast.show{opacity:1; transform:translate(-50%,0)}
 
 /* two players */
@@ -2319,7 +2319,7 @@ $('help').addEventListener('click', e => { if (e.target.id === 'help') closeHelp
 let toastTimer = 0;
 function toast(msg) {
   const t = $('toast'); t.textContent = msg; t.classList.add('show');
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 1900);
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 1900 + Math.max(0, msg.length - 30) * 45); // longer to read a longer message
 }
 const stamp = () => new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
 function download(blob, name) {

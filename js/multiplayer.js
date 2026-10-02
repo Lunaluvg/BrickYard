@@ -9,10 +9,15 @@
 // If the host leaves, the player with the lowest number takes the game over and the others follow.
 // brickyard.html loads this only over http(s); opened as a plain file, the game is solo.
 
+import { RELAYS } from './relay.js';
+
 const MAX_PLAYERS = 5;
 const PROTOCOL = 2; // copies of the game on different versions can't play together; bump when the messages change
 const TINT = { 1: '#F2CD37', 2: '#36AEBF', 3: '#FE8A18', 4: '#AC78BA', 5: '#BBE90B' };
 const PEERJS = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';
+// How browsers find a way to each other: STUN servers tell each one its public address, and when two networks
+// still won't link up, a relay passes everything along (relay.js). PeerJS's own relays are gone, so they're left out.
+const PEER_OPTIONS = { config: { iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }, ...RELAYS] } };
 const ROOM_ID = code => `brickyard-game-${code}`; // what a hosted game is called on the PeerJS service
 const CHUNK = 16000; // characters per WebRTC message; Safari takes 64 KB at most
 const nameOf = slot => `Player ${slot}`;
@@ -422,7 +427,7 @@ function run(g, info) {
     try { Peer = await loadPeerJS(); } catch (e) { return 'error'; }
     if (my !== gen) return 'stale';
     return new Promise(resolve => {
-      const p = pj = new Peer(ROOM_ID(c));
+      const p = pj = new Peer(ROOM_ID(c), PEER_OPTIONS);
       let opened = false;
       const fail = r => { clearTimeout(timer); if (pj === p) pj = null; try { p.destroy(); } catch (e) { /* gone */ } resolve(r); };
       const timer = setTimeout(() => { if (!opened) fail('error'); }, 20000);
@@ -475,9 +480,9 @@ function run(g, info) {
     try { Peer = await loadPeerJS(); } catch (e) { return 'error'; }
     if (my !== gen) return 'stale';
     return new Promise(resolve => {
-      const p = pj = new Peer();
+      const p = pj = new Peer(undefined, PEER_OPTIONS);
       let settled = false, conn = null;
-      const timer = setTimeout(() => settle('timeout'), 15000);
+      const timer = setTimeout(() => settle(conn ? 'nolink' : 'timeout'), 15000); // found the game but no way through, or no answer at all
       function settle(r, hello) {
         if (settled) return;
         settled = true; clearTimeout(timer);
@@ -508,11 +513,11 @@ function run(g, info) {
           else if (m.t === 'ops' || m.t === 'xf') settle('oldhost'); // an older copy of the game sends the world without a hello
         });
         conn.on('data', d => { if (hostConn === conn) heardAt = performance.now(); read(d); }); // each piece of a big world counts
-        const gone = () => { if (!settled) settle('error'); else if (hostConn === conn) hostLost(); };
+        const gone = () => { if (!settled) settle('nolink'); else if (hostConn === conn) hostLost(); };
         conn.on('close', gone);
         conn.on('error', gone);
       });
-      p.on('error', err => { if (!settled) settle(err.type === 'peer-unavailable' ? 'missing' : 'error'); });
+      p.on('error', err => { if (!settled) settle(err.type === 'peer-unavailable' ? 'missing' : conn && err.type === 'webrtc' ? 'nolink' : 'error'); });
     });
   }
   const failText = (r, c) => ({
@@ -521,6 +526,8 @@ function run(g, info) {
     old: 'That game has a newer version of Brickyard. Refresh this page, then join again',
     oldhost: 'That game has an older version of Brickyard. Ask the others to refresh their page',
     timeout: "Couldn't connect to that game. Try again",
+    nolink: RELAYS.length ? `Found game ${c} but couldn't link up with it. Try again`
+      : `Found game ${c} but couldn't link up with it. Different networks, like mobile data and home WiFi, need a relay, and none is set up yet`,
   })[r] || "Couldn't reach the online service. Is the internet on?";
 
   async function startGame() {
