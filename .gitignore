@@ -1,0 +1,4 @@
+# this computer's network choice for play-together.bat
+.play-together.json
+# Claude Code's local settings
+.claude/

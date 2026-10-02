@@ -1,0 +1,2260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Brickyard — 3D brick builder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#16202b; --ink-2:#5a6878; --paper:rgba(250,252,255,.80); --paper-solid:#f7f9fc;
+  --line:rgba(22,32,43,.10); --hover:rgba(22,32,43,.06);
+  --accent:#F2CD37; --accent-ink:#2a2100; --danger:#d93a2b;
+  --bg1:#e9eef4; --bg2:#a9b5c3;
+  --shadow:0 18px 40px -20px rgba(20,35,55,.45), 0 2px 8px -3px rgba(20,35,55,.18);
+  --r-lg:22px; --r-md:14px; --r-sm:10px;
+  --safe-t:env(safe-area-inset-top,0px); --safe-b:env(safe-area-inset-bottom,0px);
+  --safe-l:env(safe-area-inset-left,0px); --safe-r:env(safe-area-inset-right,0px);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ink:#eef2f7; --ink-2:#98a6b6; --paper:rgba(24,30,38,.78); --paper-solid:#1a2029;
+    --line:rgba(255,255,255,.09); --hover:rgba(255,255,255,.06);
+    --bg1:#34404e; --bg2:#0e1319;
+    --shadow:0 18px 40px -18px rgba(0,0,0,.7), 0 2px 8px -3px rgba(0,0,0,.4);
+    color-scheme: dark;
+  }
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{
+  background:radial-gradient(120% 90% at 50% 18%, var(--bg1), var(--bg2));
+  color:var(--ink);
+  font-family:'Bricolage Grotesque', ui-rounded, 'SF Pro Rounded', 'Segoe UI', system-ui, sans-serif;
+  font-size:14px; line-height:1.35;
+  overflow:hidden; -webkit-font-smoothing:antialiased; user-select:none; -webkit-user-select:none;
+}
+#c{position:fixed; inset:0; width:100%; height:100%; display:block; touch-action:none; outline:none}
+button{font:inherit; color:inherit; border:0; background:none; cursor:pointer; -webkit-tap-highlight-color:transparent}
+button:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+.panel{
+  position:fixed; background:var(--paper);
+  -webkit-backdrop-filter:blur(16px) saturate(1.5); backdrop-filter:blur(16px) saturate(1.5);
+  border:1px solid var(--line); box-shadow:var(--shadow);
+}
+svg.i{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round; flex:none}
+
+/* top bar */
+.topbar{position:fixed; top:calc(14px + var(--safe-t)); left:calc(14px + var(--safe-l)); right:calc(14px + var(--safe-r)); display:flex; align-items:flex-start; justify-content:space-between; gap:10px; pointer-events:none; z-index:4}
+.topbar .panel{position:relative; pointer-events:auto}
+.brand{border-radius:var(--r-lg); padding:10px 16px 10px 12px; display:flex; align-items:center; gap:12px}
+.logo{display:flex; align-items:center; gap:9px; font-weight:800; font-size:21px; letter-spacing:-.03em}
+.mark{display:grid; grid-template-columns:repeat(2,9px); gap:3px; padding:4px; background:var(--accent); border-radius:6px; box-shadow:inset 0 -2px 0 rgba(0,0,0,.15)}
+.mark i{width:9px; height:9px; border-radius:50%; background:#f7dc62; box-shadow:inset 0 -1.5px 0 rgba(0,0,0,.18), 0 0 0 1px rgba(0,0,0,.05)}
+.count{color:var(--ink-2); font-size:13px; padding-left:12px; border-left:1px solid var(--line); font-variant-numeric:tabular-nums; white-space:nowrap}
+.count b{color:var(--ink); font-weight:600}
+.tools{border-radius:999px; padding:5px; display:flex; gap:2px}
+.tool{display:flex; align-items:center; gap:7px; padding:8px 14px 8px 11px; border-radius:999px; font-weight:600; transition:background .15s}
+.tool:hover{background:var(--hover)}
+.tool kbd{font:inherit; font-size:11px; font-weight:600; color:var(--ink-2); border:1px solid var(--line); border-radius:6px; padding:0 5px; line-height:17px}
+.tool.on{background:var(--accent); color:var(--accent-ink)}
+.tool.on kbd{color:var(--accent-ink); border-color:rgba(0,0,0,.18)}
+.actions{border-radius:var(--r-lg); padding:5px; display:flex; gap:2px}
+.act{width:40px; height:40px; display:grid; place-items:center; border-radius:var(--r-md); position:relative; transition:background .15s}
+.act:hover, .act.on{background:var(--hover)}
+.act:disabled{opacity:.35; cursor:default}
+.act.sep{margin-left:6px}
+.act.sep::before{content:""; position:absolute; left:-4px; top:10px; bottom:10px; width:1px; background:var(--line)}
+.act.spin svg{animation:spin90 .28s ease-out}
+@keyframes spin90{from{transform:rotate(-90deg)}to{transform:none}}
+#boomBtn.on{color:var(--danger)}
+#boomBtn .bar, #boomBtn .rod{transform-box:view-box; transform-origin:12px 12px}
+#boomBtn.fire .bar{animation:plungeBar .5s ease-out}
+#boomBtn.fire .rod{animation:plungeRod .5s ease-out}
+@keyframes plungeBar{20%{transform:translateY(3.5px)}}
+@keyframes plungeRod{20%{transform:scaleY(.5)}}
+@media (hover:hover){
+  .act.on[data-tip]:hover::after{display:none}
+  [data-tip]:hover::after{
+    content:attr(data-tip); position:absolute; top:calc(100% + 8px); left:50%; transform:translateX(-50%);
+    background:var(--ink); color:var(--paper-solid); font-size:12px; font-weight:600; white-space:nowrap;
+    padding:5px 9px; border-radius:8px; pointer-events:none; z-index:5;
+  }
+}
+
+/* popovers */
+.pop{top:calc(72px + var(--safe-t)); right:calc(14px + var(--safe-r)); width:300px; border-radius:var(--r-lg); padding:16px; z-index:6}
+.pop[hidden]{display:none}
+.pop h3{margin:0 0 12px; font-size:16px; font-weight:800; letter-spacing:-.02em}
+.row{display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0 0 14px}
+.row > span{font-weight:600}
+.row small{display:block; color:var(--ink-2); font-weight:400; font-size:12px}
+.row.stack{flex-direction:column; align-items:stretch; gap:8px}
+.row.stack .seg button{flex:1}
+.seg{display:flex; background:var(--hover); border-radius:999px; padding:3px; flex:none}
+.seg button{padding:5px 9px; border-radius:999px; font-weight:600; font-size:12.5px}
+.seg button.on{background:var(--paper-solid); box-shadow:0 1px 3px rgba(0,0,0,.18)}
+.switch{width:42px; height:24px; border-radius:999px; background:var(--line); position:relative; flex:none; transition:background .15s}
+.switch::after{content:""; position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.3); transition:transform .15s}
+.switch[aria-checked="true"]{background:var(--accent)}
+.switch[aria-checked="true"]::after{transform:translateX(18px)}
+.wide{width:100%; padding:10px; border-radius:var(--r-md); background:var(--hover); font-weight:600}
+.wide:hover:not(:disabled){background:var(--line)}
+.wide:disabled{opacity:.5; cursor:default}
+.note{margin:12px 0 0; color:var(--ink-2); font-size:12.5px; line-height:1.45}
+.menu-item{display:block; width:100%; text-align:left; padding:9px 10px; border-radius:var(--r-sm); font-weight:600}
+.menu-item:hover{background:var(--hover)}
+.menu-item.danger{color:var(--danger)}
+.pop hr{border:0; border-top:1px solid var(--line); margin:14px 0 8px}
+.bases{display:flex; gap:7px; padding:3px}
+#gfxSeg button{flex:1}
+
+/* parts library */
+.library{top:calc(84px + var(--safe-t)); left:calc(14px + var(--safe-l)); bottom:calc(92px + var(--safe-b)); width:224px; border-radius:var(--r-lg); display:flex; flex-direction:column; overflow:hidden}
+.lib-scroll{overflow:auto; padding:6px 10px 14px; scrollbar-width:thin}
+.group-name{font-size:13px; font-weight:600; color:var(--ink-2); margin:12px 4px 6px}
+.group-name:first-child{margin-top:8px}
+.grid{display:grid; grid-template-columns:repeat(3,1fr); gap:5px}
+.part{display:flex; flex-direction:column; align-items:center; padding:4px 2px 6px; border-radius:var(--r-sm); transition:background .12s, box-shadow .12s}
+.part:hover{background:var(--hover)}
+.part img{width:56px; height:56px; display:block; pointer-events:none}
+.part span{font-size:12px; font-weight:600; font-variant-numeric:tabular-nums; margin-top:-2px}
+.part.on{background:var(--hover); box-shadow:inset 0 0 0 2px var(--accent)}
+
+/* palette */
+.palette{bottom:calc(14px + var(--safe-b)); left:50%; transform:translateX(-50%); border-radius:999px; padding:8px 12px; display:flex; align-items:center; gap:12px; max-width:calc(100vw - 28px)}
+.swatches{display:flex; gap:5px; overflow-x:auto; scrollbar-width:none; padding:3px}
+.swatches::-webkit-scrollbar{display:none}
+.sw{width:28px; height:28px; flex:none; border-radius:50%; position:relative;
+  background:radial-gradient(circle at 34% 30%, rgba(255,255,255,.55), rgba(255,255,255,0) 46%), var(--c);
+  box-shadow:inset 0 -2.5px 0 rgba(0,0,0,.22), inset 0 0 0 1px rgba(0,0,0,.12);
+  transition:transform .12s}
+.sw:hover{transform:translateY(-2px)}
+.sw.trans{background:radial-gradient(circle at 34% 30%, rgba(255,255,255,.8), rgba(255,255,255,0) 40%), linear-gradient(135deg, color-mix(in srgb, var(--c) 55%, transparent), color-mix(in srgb, var(--c) 90%, #fff 10%)); box-shadow:inset 0 0 0 1.5px color-mix(in srgb, var(--c) 70%, #000 10%)}
+.sw.metal{background:conic-gradient(from 200deg, var(--c), #fff 18%, var(--c) 35%, color-mix(in srgb, var(--c) 70%, #000) 60%, #fff 78%, var(--c))}
+.sw.on{box-shadow:0 0 0 2px var(--paper-solid), 0 0 0 4px var(--ink)}
+.color-name{font-weight:600; font-size:13px; white-space:nowrap; min-width:118px; padding-right:4px}
+.color-name small{display:block; color:var(--ink-2); font-weight:400; font-size:12px}
+
+/* hint, power ring, badge, toast */
+.hint{position:fixed; right:calc(18px + var(--safe-r)); bottom:calc(84px + var(--safe-b)); color:var(--ink-2); font-size:12.5px; text-align:right; line-height:1.55; pointer-events:none; max-width:280px}
+.hint b{color:var(--ink); font-weight:600}
+.hint .cam{display:block; margin-top:6px; opacity:.8}
+.power{position:fixed; width:58px; height:58px; margin:-29px 0 0 -29px; border-radius:50%; pointer-events:none; z-index:8; display:none;
+  background:conic-gradient(var(--accent) calc(var(--p, 0) * 1turn), rgba(255,255,255,.4) 0);
+  -webkit-mask:radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 6px));
+  mask:radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 6px));
+  filter:drop-shadow(0 1px 3px rgba(0,0,0,.35))}
+.power.on{display:block}
+.badge{position:fixed; top:calc(76px + var(--safe-t)); left:50%; transform:translateX(-50%); background:var(--ink); color:var(--paper-solid); font-weight:600; font-size:12.5px; padding:5px 12px; border-radius:999px; z-index:3; pointer-events:none}
+.badge[hidden]{display:none}
+#toast{position:fixed; left:50%; bottom:calc(84px + var(--safe-b)); transform:translate(-50%,8px); background:var(--ink); color:var(--paper-solid); font-weight:600; padding:9px 16px; border-radius:999px; opacity:0; pointer-events:none; transition:opacity .2s, transform .2s; white-space:nowrap; z-index:20}
+#toast.show{opacity:1; transform:translate(-50%,0)}
+
+/* two players */
+.mp{display:flex; align-items:center; gap:7px; padding:3px 2px 3px 12px; border-left:1px solid var(--line); font-weight:600; font-size:13px; color:var(--ink-2); white-space:nowrap}
+.mp[hidden]{display:none}
+.mp:hover, .mp.on{color:var(--ink)}
+.mp .dots{display:flex}
+.mp .dots i{width:10px; height:10px; border-radius:50%; background:var(--c, var(--line)); box-shadow:inset 0 -1.5px 0 rgba(0,0,0,.2)}
+.mp .dots i + i{margin-left:-3px; box-shadow:inset 0 -1.5px 0 rgba(0,0,0,.2), 0 0 0 1.5px var(--paper-solid)}
+.mp[data-state="alone"] .dots i:first-child{animation:waiting 1.6s ease-in-out infinite}
+@keyframes waiting{50%{opacity:.3}}
+#mpPop{left:calc(14px + var(--safe-l)); right:auto}
+#mpNote{margin:0 0 10px}
+.mp-addr{font-size:18px; font-weight:800; letter-spacing:-.02em; padding:10px 12px; margin:0 0 8px; border-radius:var(--r-md); background:var(--hover); word-break:break-all; user-select:all; -webkit-user-select:all}
+.peer-tag{position:fixed; left:0; top:0; padding:3px 9px; border-radius:999px; background:var(--c); color:#16202b; font-size:12px; font-weight:700; white-space:nowrap; pointer-events:none; z-index:3; box-shadow:0 2px 6px rgba(0,0,0,.25)}
+.peer-tag[hidden]{display:none}
+.mp-addr.code{font-size:34px; letter-spacing:.2em; text-align:center}
+.wide.mp-main, .wide.mp-main:hover:not(:disabled){background:var(--accent); color:var(--accent-ink); font-weight:800}
+.mp-join{display:flex; gap:8px; margin:10px 0 0}
+.mp-join[hidden]{display:none}
+.mp-join input{flex:1; min-width:0; font:inherit; font-size:20px; font-weight:800; letter-spacing:.25em; text-align:center; padding:8px 10px; border-radius:var(--r-md); border:1px solid var(--line); background:var(--paper-solid); color:var(--ink); user-select:text; -webkit-user-select:text}
+.mp-join input:focus{outline:2px solid var(--accent); outline-offset:1px}
+.mp-join .wide{width:auto; padding:10px 18px}
+#mpLeave{margin-top:8px}
+
+/* modal */
+.modal{position:fixed; inset:0; display:grid; place-items:center; background:rgba(10,15,20,.35); z-index:30; padding:20px}
+.modal[hidden]{display:none}
+.card{background:var(--paper-solid); color:var(--ink); border-radius:var(--r-lg); box-shadow:var(--shadow); padding:26px 28px 22px; width:min(480px,100%); max-height:90vh; overflow:auto}
+.card h2{margin:0 0 4px; font-size:24px; font-weight:800; letter-spacing:-.03em}
+.card p{margin:0 0 16px; color:var(--ink-2)}
+.card table{width:100%; border-collapse:collapse}
+.card td{padding:7px 0; border-top:1px solid var(--line); vertical-align:top}
+.card td:first-child{width:38%; font-weight:600; padding-right:10px}
+.card .close{margin-top:18px; width:100%; padding:11px; border-radius:var(--r-md); background:var(--accent); color:var(--accent-ink); font-weight:800}
+
+/* loader */
+#loader{position:fixed; inset:0; display:grid; place-items:center; z-index:40; background:radial-gradient(120% 90% at 50% 18%, var(--bg1), var(--bg2)); transition:opacity .4s}
+#loader.gone{opacity:0; pointer-events:none}
+.load-in{display:flex; flex-direction:column; align-items:center; gap:14px; font-weight:600; color:var(--ink-2); text-align:center; max-width:320px}
+.dots{display:flex; gap:7px}
+.dots i{width:16px; height:16px; border-radius:50%; background:var(--accent); box-shadow:inset 0 -3px 0 rgba(0,0,0,.18); animation:hop 1s infinite ease-in-out}
+.dots i:nth-child(2){animation-delay:.12s; background:#C91A09}
+.dots i:nth-child(3){animation-delay:.24s; background:#0055BF}
+.dots i:nth-child(4){animation-delay:.36s; background:#237841}
+@keyframes hop{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-10px)}}
+@media (prefers-reduced-motion: reduce){ .dots i, .act.spin svg, #boomBtn.fire .bar, #boomBtn.fire .rod{animation:none} *{transition:none !important} }
+
+@media (max-width: 1560px){ .tool kbd{display:none} .tool{padding:8px 13px 8px 11px} }
+@media (max-width: 1300px){ .tool .lbl{display:none} .tool{padding:9px} }
+@media (max-width: 1100px){ .hint{display:none} }
+@media (max-width: 1020px){
+  .topbar{flex-direction:column}
+  .topbar .actions{position:fixed; flex-direction:column; top:calc(76px + var(--safe-t)); right:calc(10px + var(--safe-r))}
+  .act.sep{margin-left:0; margin-top:6px}
+  .act.sep::before{left:10px; right:10px; top:-4px; bottom:auto; width:auto; height:1px}
+  [data-tip]:hover::after{display:none}
+  .pop{top:calc(126px + var(--safe-t)); right:calc(66px + var(--safe-r)); width:min(300px, calc(100vw - 86px))}
+  .badge{top:calc(124px + var(--safe-t)); left:calc(14px + var(--safe-l)); transform:none}
+  .library{top:auto; bottom:calc(74px + var(--safe-b)); left:calc(10px + var(--safe-l)); right:calc(10px + var(--safe-r)); width:auto; height:92px; border-radius:var(--r-md)}
+  .lib-scroll{display:flex; overflow-x:auto; overflow-y:hidden; padding:4px 6px; gap:10px}
+  .group-name{display:none}
+  .grid{display:flex; gap:3px}
+  .part{flex:none; width:62px}
+  .palette{bottom:calc(10px + var(--safe-b)); padding:6px 8px}
+  .color-name, .count{display:none}
+  #toast{bottom:calc(178px + var(--safe-b))}
+}
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+  "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
+} }
+</script>
+</head>
+<body>
+<canvas id="c" tabindex="0" aria-label="3D building area"></canvas>
+
+<div class="topbar">
+  <header class="panel brand">
+    <div class="logo"><span class="mark"><i></i><i></i><i></i><i></i></span>Brickyard</div>
+    <div class="count"><b id="count">0</b> bricks<span id="looseWrap" hidden>, <b id="loose">0</b> loose</span></div>
+    <button class="mp" id="mpBtn" hidden aria-haspopup="dialog" aria-expanded="false"><span class="dots"><i></i><i></i></span><span id="mpText">Connecting…</span></button>
+  </header>
+
+  <nav class="panel tools" aria-label="Tools">
+    <button class="tool on" data-tool="build" title="Build (B)"><svg class="i" viewBox="0 0 24 24"><rect x="3.5" y="9" width="17" height="10" rx="2"/><path d="M7 9V6.5h3V9M14 9V6.5h3V9"/></svg><span class="lbl">Build</span><kbd>B</kbd></button>
+    <button class="tool" data-tool="throw" title="Throw (T)"><svg class="i" viewBox="0 0 24 24"><path d="M6.5 16.5C8.5 10 13 6.3 19.5 5.6"/><path d="M15.9 3.7l3.8 1.9-1.9 3.8"/><rect x="2.6" y="16.4" width="5.2" height="4.2" rx="1"/></svg><span class="lbl">Throw</span><kbd>T</kbd></button>
+    <button class="tool" data-tool="erase" title="Remove (E)"><svg class="i" viewBox="0 0 24 24"><path d="M20 20H9.5L4.2 14.7a1.8 1.8 0 0 1 0-2.5L12 4.4a1.8 1.8 0 0 1 2.5 0l5.1 5.1a1.8 1.8 0 0 1 0 2.5L11.8 19.8"/><path d="M8 10.5l6 6"/></svg><span class="lbl">Remove</span><kbd>E</kbd></button>
+    <button class="tool" data-tool="paint" title="Paint (P)"><svg class="i" viewBox="0 0 24 24"><path d="M12 3.5s6 6.4 6 10.8a6 6 0 0 1-12 0c0-4.4 6-10.8 6-10.8z"/></svg><span class="lbl">Paint</span><kbd>P</kbd></button>
+    <button class="tool" data-tool="pick" title="Copy a part (I)"><svg class="i" viewBox="0 0 24 24"><path d="M14.5 4.5l5 5-2 2-5-5zM12.5 8.5l-7 7V19h3.5l7-7"/></svg><span class="lbl">Copy</span><kbd>I</kbd></button>
+  </nav>
+
+  <div class="panel actions">
+    <button class="act" id="undo" data-tip="Undo (Ctrl+Z)" aria-label="Undo"><svg class="i" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
+    <button class="act" id="redo" data-tip="Redo (Ctrl+Y)" aria-label="Redo"><svg class="i" viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg></button>
+    <button class="act" id="rotate" data-tip="Turn part (R)" aria-label="Turn part"><svg class="i" viewBox="0 0 24 24"><path d="M20.5 12a8.5 8.5 0 1 1-2.8-6.3"/><path d="M20.5 3.5v5.5H15"/></svg></button>
+    <button class="act sep" id="view" data-tip="Reset view (F)" aria-label="Reset view"><svg class="i" viewBox="0 0 24 24"><path d="M3.5 8V3.5H8M20.5 8V3.5H16M3.5 16v4.5H8M20.5 16v4.5H16"/><circle cx="12" cy="12" r="3"/></svg></button>
+    <button class="act" id="photo" data-tip="Save a photo" aria-label="Save a photo"><svg class="i" viewBox="0 0 24 24"><path d="M4 8h3.2l1.8-2.8h6L16.8 8H20v11H4z"/><circle cx="12" cy="13.2" r="3.3"/></svg></button>
+    <button class="act sep" id="boomBtn" data-tip="Set off TNT (D)" aria-label="Set off TNT"><svg class="i" viewBox="0 0 24 24"><path class="rod" d="M12 12V5"/><path class="bar" d="M7.5 5h9"/><rect x="4.5" y="12" width="15" height="8.5" rx="2"/><path d="M8.5 16.25h2.5"/></svg></button>
+    <button class="act" id="physBtn" data-tip="Physics" aria-label="Physics settings" aria-haspopup="dialog" aria-expanded="false"><svg class="i" viewBox="0 0 24 24"><path d="M12 2.8v3.4M12 17.8v3.4M2.8 12h3.4M17.8 12h3.4M5.5 5.5l2.4 2.4M16.1 16.1l2.4 2.4M5.5 18.5l2.4-2.4M16.1 7.9l2.4-2.4"/><circle cx="12" cy="12" r="2.6"/></svg></button>
+    <button class="act" id="moreBtn" data-tip="More" aria-label="More options" aria-haspopup="menu" aria-expanded="false"><svg class="i" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="18.5" cy="12" r="1.4" fill="currentColor"/></svg></button>
+    <button class="act sep" id="sound" data-tip="Sound on" aria-label="Toggle sound"><svg class="i" viewBox="0 0 24 24"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path class="wave" d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a7.8 7.8 0 0 1 0 11"/><path class="mute" d="M16 9.5l5 5M21 9.5l-5 5" style="display:none"/></svg></button>
+    <button class="act" id="helpBtn" data-tip="Controls (H)" aria-label="Show controls"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.3a2.5 2.5 0 1 1 3.4 2.3c-.7.3-1 .8-1 1.6M12 16.6h.01"/></svg></button>
+  </div>
+</div>
+
+<div class="panel pop" id="physPop" hidden role="dialog" aria-label="Physics">
+  <h3>Physics</h3>
+  <div class="row stack"><span>Clutch<small>How hard bricks grip each other</small></span>
+    <div class="seg" id="clutchSeg"><button data-v="0">Loose</button><button data-v="1" class="on">Normal</button><button data-v="2">Tight</button></div>
+  </div>
+  <div class="row"><span>Slow motion<small>Or hold Space</small></span><button class="switch" id="slowSw" role="switch" aria-checked="false" aria-label="Slow motion"></button></div>
+  <button class="wide" id="sweep" disabled>No loose pieces</button>
+  <p class="note">Pick the Throw tool (T), then press and hold to throw harder. Ctrl+Z puts everything back together.</p>
+</div>
+
+<div class="panel pop" id="morePop" hidden role="menu" aria-label="More">
+  <h3>Baseplate</h3>
+  <div class="bases" id="baseSw"></div>
+  <hr>
+  <h3>Graphics</h3>
+  <div class="seg" id="gfxSeg" role="group" aria-label="Graphics"><button data-v="0">Low</button><button data-v="1">Medium</button><button data-v="2" class="on">High</button></div>
+  <p class="note" id="gfxNote"></p>
+  <hr>
+  <button class="menu-item" id="save">Download model</button>
+  <button class="menu-item" id="load">Open model…</button>
+  <button class="menu-item danger" id="clear">Clear everything</button>
+</div>
+
+<div class="panel pop" id="mpPop" hidden role="dialog" aria-label="Play together">
+  <h3>Play together</h3>
+  <p class="note" id="mpNote"></p>
+  <div class="mp-addr" id="mpAddr" hidden></div>
+  <button class="wide" id="mpCopy" hidden>Copy address</button>
+  <button class="wide mp-main" id="mpStart" hidden>Start a game</button>
+  <form class="mp-join" id="mpJoinForm" hidden><input id="mpCode" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder="Code" aria-label="Game code"><button class="wide" id="mpJoin">Join</button></form>
+  <button class="wide" id="mpLeave" hidden>Leave game</button>
+  <p class="note" id="mpFoot"></p>
+</div>
+
+<div class="badge" id="slowBadge" hidden>Slow motion</div>
+
+<aside class="panel library" aria-label="Parts">
+  <div class="lib-scroll" id="lib"></div>
+</aside>
+
+<footer class="panel palette" aria-label="Colors">
+  <div class="color-name" id="colorName">Bright Red<small>Solid</small></div>
+  <div class="swatches" id="swatches"></div>
+</footer>
+
+<div class="hint" id="hint"></div>
+<div class="power" id="power"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<div class="modal" id="help" hidden>
+  <div class="card" role="dialog" aria-labelledby="helpTitle">
+    <h2 id="helpTitle">How to build</h2>
+    <p>Parts snap to the stud grid and click onto whatever is underneath. Knock things over with the Throw tool. Your model saves itself in this browser.</p>
+    <table>
+      <tr><td>Place a part</td><td>Click, or tap on a touch screen</td></tr>
+      <tr><td>Turn the part</td><td>R, or Q for the other way. Works with any keyboard language</td></tr>
+      <tr><td>Throw</td><td>Throw tool (T): press and hold, then let go. Hold longer to throw harder</td></tr>
+      <tr><td>TNT</td><td>Build it in, then press D to light the fuses. A hard hit sets it off too, so try throwing it</td></tr>
+      <tr><td>Remove a part</td><td>Shift+click, right-click, or Remove tool (E). Anything resting on it falls</td></tr>
+      <tr><td>Copy a part</td><td>Alt+click, or Copy tool (I)</td></tr>
+      <tr><td>Paint</td><td>Paint tool (P), then click a part</td></tr>
+      <tr><td>Slow motion</td><td>Hold Space</td></tr>
+      <tr><td>Next part or color</td><td>, and . for parts, [ and ] for colors</td></tr>
+      <tr><td>Camera</td><td>Drag to orbit, right-drag to pan, scroll to zoom, F to reset</td></tr>
+      <tr><td>Play together</td><td>Tap Play together at the top: one player starts a game, the other joins with its code. Or run play-together.bat to play over your own WiFi</td></tr>
+      <tr><td>Undo, redo</td><td>Ctrl+Z, Ctrl+Y. Undo also rebuilds what you knocked down</td></tr>
+    </table>
+    <button class="close" id="helpClose">Start building</button>
+  </div>
+</div>
+
+<div id="loader"><div class="load-in"><div class="dots"><i></i><i></i><i></i><i></i></div><div id="loadMsg">Sorting the bricks…</div></div></div>
+<input type="file" id="file" accept=".json,application/json" hidden>
+
+<script>
+  // If the 3D engine can't load (offline or a blocked CDN), say so plainly.
+  setTimeout(() => {
+    if (!window.__brickyardReady) {
+      document.getElementById('loadMsg').textContent =
+        "The 3D engine didn't load. Brickyard needs an internet connection the first time it opens. Check your connection and reload.";
+      document.querySelector('.dots').style.display = 'none';
+    }
+  }, 15000);
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import * as CANNON from 'cannon-es';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+
+const $ = id => document.getElementById(id);
+
+/* ───────────────────────── Constants ───────────────────────── */
+// Real brick proportions: stud pitch 8 mm = 1 unit, plate 3.2 mm = 0.4, brick = 3 plates.
+const PLATE = 0.4, GRID = 32, HALF = GRID / 2, MAXY = 120;
+const STUD_R = 0.3, STUD_H = 0.2, GAP = 0.02;
+const STORE_KEY = 'brickyard-model-v2', OLD_KEY = 'brickyard-model-v1', HELP_KEY = 'brickyard-seen-help-2', GFX_KEY = 'brickyard-graphics';
+const GRAVITY = 40, MAX_SPEED = 110;
+// Clutch: impulse one stud connection can take before it lets go.
+const CLUTCH = [{ name: 'Loose', s: 2.5 }, { name: 'Normal', s: 5.5 }, { name: 'Tight', s: 12 }];
+const PHYS = {
+  damage: 0.35,   // share of an impact impulse that hits the struck brick's connections
+  self: 0.3,      // same, for a falling chunk hitting something
+  falloff: 0.55,  // how much of the shock reaches the next brick along
+  impactV: 3.5,   // ignore contacts gentler than this (units/s)
+  push: 0.35,     // share of the impulse handed to the piece that breaks free
+  pass: 0.5,      // how much speed a thrown part keeps after smashing through
+  rest: 0.08,     // strength of a brick that rests on something with no studs
+};
+const TNT = { fuse: 1.1, trigger: 13 };  // seconds a lit fuse burns; impact speed that sets TNT off
+// Graphics levels. res: [highest pixel ratio, scale]; rich: clear-coat shine, glassy see-through parts
+// and the blast's light flash; studs: baseplate stud detail; fx: share of explosion particles.
+const QUALITY = [
+  { name: 'Low',    note: 'Fastest. No shadows, simpler shine and effects', res: [1, 0.75], shadow: 0,    soft: false, rich: false, studs: 10, fx: 0.5 },
+  { name: 'Medium', note: 'Balanced. Lighter shadows, a little less sharp', res: [1.25, 1], shadow: 1024, soft: false, rich: true,  studs: 16, fx: 0.75 },
+  { name: 'High',   note: 'Best look. Soft shadows and glassy see-through parts', res: [2, 1], shadow: 2048, soft: true, rich: true, studs: 24, fx: 1 },
+];
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const UP = new THREE.Vector3(0, 1, 0);
+
+const TYPES = [
+  ['Bricks','b1x1','1×1',1,1,3,'box'], ['Bricks','b1x2','1×2',1,2,3,'box'], ['Bricks','b1x3','1×3',1,3,3,'box'],
+  ['Bricks','b1x4','1×4',1,4,3,'box'], ['Bricks','b1x6','1×6',1,6,3,'box'], ['Bricks','b1x8','1×8',1,8,3,'box'],
+  ['Bricks','b2x2','2×2',2,2,3,'box'], ['Bricks','b2x3','2×3',2,3,3,'box'], ['Bricks','b2x4','2×4',2,4,3,'box'],
+  ['Bricks','b2x6','2×6',2,6,3,'box'], ['Bricks','b2x8','2×8',2,8,3,'box'], ['Bricks','b4x4','4×4',4,4,3,'box'],
+  ['Plates','p1x1','1×1',1,1,1,'box'], ['Plates','p1x2','1×2',1,2,1,'box'], ['Plates','p1x4','1×4',1,4,1,'box'],
+  ['Plates','p2x2','2×2',2,2,1,'box'], ['Plates','p2x4','2×4',2,4,1,'box'], ['Plates','p2x6','2×6',2,6,1,'box'],
+  ['Plates','p4x4','4×4',4,4,1,'box'], ['Plates','p4x8','4×8',4,8,1,'box'], ['Plates','p6x8','6×8',6,8,1,'box'],
+  ['Tiles','t1x1','1×1',1,1,1,'tile'], ['Tiles','t1x2','1×2',1,2,1,'tile'], ['Tiles','t1x4','1×4',1,4,1,'tile'],
+  ['Tiles','t2x2','2×2',2,2,1,'tile'], ['Tiles','t2x4','2×4',2,4,1,'tile'], ['Tiles','t4x4','4×4',4,4,1,'tile'],
+  ['Slopes','s1x2','1×2',1,2,3,'slope'], ['Slopes','s2x2','2×2',2,2,3,'slope'], ['Slopes','s4x2','4×2',4,2,3,'slope'],
+  ['Round','r1x1','1×1',1,1,3,'round'], ['Round','r2x2','2×2',2,2,3,'round'], ['Round','rp1x1','Plate 1×1',1,1,1,'round'],
+  ['Round','rp2x2','Plate 2×2',2,2,1,'round'], ['Round','cone','Cone',1,1,3,'cone'], ['Round','dome','Dome 2×2',2,2,3,'dome'],
+  ['TNT','tnt1x1','1×1',1,1,3,'tnt'], ['TNT','tnt2x2','2×2',2,2,3,'tnt'], ['TNT','tnt2x4','2×4',2,4,3,'tnt'],
+].map(([group,id,label,w,d,h,kind]) => ({ group, id, label, w, d, h, kind }));
+const TYPE_BY_ID = Object.fromEntries(TYPES.map(t => [t.id, t]));
+const KIND_MASS = { box: 1, tile: 1, slope: 0.7, round: 0.8, cone: 0.45, dome: 0.65, tnt: 1 };
+const partMass = t => t.w * t.d * t.h * 0.1 * KIND_MASS[t.kind];
+const isTNT = id => TYPE_BY_ID[id]?.kind === 'tnt';
+const jitter = () => 0.8 + Math.random() * 0.4;
+
+const COLORS = [
+  { name:'Bright Red', hex:'#C91A09' }, { name:'Orange', hex:'#FE8A18' }, { name:'Bright Yellow', hex:'#F2CD37' },
+  { name:'Lime', hex:'#BBE90B' }, { name:'Green', hex:'#237841' }, { name:'Dark Green', hex:'#184632' },
+  { name:'Medium Azure', hex:'#36AEBF' }, { name:'Blue', hex:'#0055BF' }, { name:'Dark Blue', hex:'#0A3463' },
+  { name:'Lavender', hex:'#AC78BA' }, { name:'Bright Pink', hex:'#E4ADC8' }, { name:'Tan', hex:'#E4CD9E' },
+  { name:'Reddish Brown', hex:'#582A12' }, { name:'White', hex:'#F4F4F4' }, { name:'Light Bluish Gray', hex:'#A0A5A9' },
+  { name:'Dark Bluish Gray', hex:'#6C6E68' }, { name:'Black', hex:'#1B2A34' },
+  { name:'Trans Clear', hex:'#EEF3F6', finish:'trans' }, { name:'Trans Light Blue', hex:'#AEEFEC', finish:'trans' },
+  { name:'Trans Red', hex:'#E0301E', finish:'trans' }, { name:'Trans Yellow', hex:'#F5CD2F', finish:'trans' },
+  { name:'Pearl Gold', hex:'#C9A03E', finish:'metal', rough:.3 }, { name:'Chrome Silver', hex:'#E4E7EA', finish:'metal', rough:.16 },
+];
+const FINISH_LABEL = { undefined:'Solid', trans:'Transparent', metal:'Metallic' };
+const BASES = [
+  { name:'Green', hex:'#237841' }, { name:'Light Bluish Gray', hex:'#A0A5A9' }, { name:'Tan', hex:'#E4CD9E' },
+  { name:'Blue', hex:'#0055BF' }, { name:'White', hex:'#F4F4F4' }, { name:'Dark Bluish Gray', hex:'#6C6E68' },
+];
+
+/* ───────────────────────── Renderer & scene ───────────────────────── */
+const canvas = $('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.95;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.autoClear = false;
+
+const scene = new THREE.Scene();
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+function makeBackdrop() {
+  const cs = getComputedStyle(document.documentElement);
+  const c1 = cs.getPropertyValue('--bg1').trim(), c2 = cs.getPropertyValue('--bg2').trim();
+  const cv = document.createElement('canvas'); cv.width = cv.height = 512;
+  const g = cv.getContext('2d');
+  const grad = g.createRadialGradient(256, 150, 20, 256, 220, 470);
+  grad.addColorStop(0, c1); grad.addColorStop(1, c2);
+  g.fillStyle = grad; g.fillRect(0, 0, 512, 512);
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+  if (scene.background) scene.background.dispose();
+  scene.background = tex;
+}
+makeBackdrop();
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { makeBackdrop(); scheduleThumbs(); });
+
+const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 0.1, 500);
+const HOME = { pos: new THREE.Vector3(), target: new THREE.Vector3(0, 1, 0) };
+function homeFit() { HOME.pos.set(24, 24, 28).multiplyScalar(camera.aspect < 1 ? Math.min(1.9, 1.15 / camera.aspect) : 1); }
+homeFit(); camera.position.copy(HOME.pos);
+
+const controls = new OrbitControls(camera, canvas);
+controls.target.copy(HOME.target);
+controls.enableDamping = true; controls.dampingFactor = 0.09;
+controls.maxPolarAngle = Math.PI * 0.485;
+controls.minDistance = 5; controls.maxDistance = 95;
+controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+controls.update();
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8d8474, 0.35));
+const sun = new THREE.DirectionalLight(0xfff3e2, 3.0);
+sun.position.set(16, 30, 12);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -26, right: 26, top: 26, bottom: -26, near: 1, far: 90 });
+sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.025;
+scene.add(sun);
+const rim = new THREE.DirectionalLight(0xd8e4ff, 0.7);
+rim.position.set(-20, 14, -18); scene.add(rim);
+
+const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(300, 300), new THREE.ShadowMaterial({ opacity: 0.2 }));
+floorMesh.rotation.x = -Math.PI / 2; floorMesh.position.y = -0.25; floorMesh.receiveShadow = true; scene.add(floorMesh);
+
+/* ───────────────────────── Geometry ───────────────────────── */
+const V = (x, y) => new THREE.Vector2(x, y);
+const lathe = (points, seg) => new THREE.LatheGeometry(points, seg);
+const bev = (r, h, e) => [V(r, h - e), V(r - e * 0.29, h - e * 0.29), V(r - e, h)];
+const studGeo = (seg = 24) => lathe([V(STUD_R, -0.03), ...bev(STUD_R, STUD_H, 0.035), V(0, STUD_H)], seg);
+
+function prep(g) {
+  const r = g.index ? g.toNonIndexed() : g;
+  r.clearGroups();
+  for (const k of Object.keys(r.attributes)) if (!['position', 'normal', 'uv'].includes(k)) r.deleteAttribute(k);
+  return r;
+}
+function slopeGeo(w, d, H) {
+  const b = 0.035, g = GAP / 2, s = new THREE.Shape();
+  s.moveTo(g + b, b); s.lineTo(d - g - b, b); s.lineTo(d - g - b, PLATE - b);
+  s.lineTo(1, H - b); s.lineTo(g + b, H - b); s.closePath();
+  const geo = new THREE.ExtrudeGeometry(s, { depth: w - GAP - 2 * b, bevelEnabled: true, bevelThickness: b, bevelSize: b, bevelSegments: 2, curveSegments: 1 });
+  geo.rotateY(Math.PI / 2);
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  geo.translate(-(bb.min.x + bb.max.x) / 2, -bb.min.y, -(bb.min.z + bb.max.z) / 2);
+  return geo; // tall back edge sits on +Z
+}
+function buildGeo(t) {
+  const H = t.h * PLATE, parts = [];
+  let studs = true, studRowOnly = null;
+  if (t.kind === 'box' || t.kind === 'tile' || t.kind === 'tnt') {
+    const g = new RoundedBoxGeometry(t.w - GAP, H - GAP * 0.5, t.d - GAP, 2, 0.045);
+    g.translate(0, (H - GAP * 0.5) / 2, 0); parts.push(g);
+    if (t.kind === 'tile') studs = false;
+  } else if (t.kind === 'slope') {
+    parts.push(slopeGeo(t.w, t.d, H)); studRowOnly = t.d - 1;
+  } else if (t.kind === 'round') {
+    const R = t.w / 2 - 0.03;
+    parts.push(lathe([V(R, 0), ...bev(R, H, 0.05), V(0, H)], 48));
+  } else if (t.kind === 'cone') {
+    parts.push(lathe([V(0.47, 0), V(0.47, 0.34), V(0.44, 0.4), V(0.25, H - 0.02), V(0.23, H), V(0, H)], 40)); studs = false;
+    const st = studGeo(); st.scale(0.78, 1, 0.78); st.translate(0, H, 0); parts.push(st);
+  } else if (t.kind === 'dome') {
+    const pts = [V(0.97, 0), V(0.97, 0.36)];
+    for (let i = 1; i <= 16; i++) { const a = (i / 16) * Math.PI / 2; pts.push(V(0.97 * Math.cos(a), 0.36 + (H - 0.36 + 0.06) * Math.sin(a))); }
+    parts.push(lathe(pts, 48)); studs = false;
+    const st = studGeo(); st.translate(0, H + 0.02, 0); parts.push(st);
+  }
+  if (studs) {
+    for (let i = 0; i < t.w; i++) for (let j = 0; j < t.d; j++) {
+      if (studRowOnly !== null && j !== studRowOnly) continue;
+      const st = studGeo(); st.translate(i + 0.5 - t.w / 2, H, j + 0.5 - t.d / 2); parts.push(st);
+    }
+  }
+  const merged = mergeGeometries(parts.map(prep), false);
+  merged.computeBoundingSphere(); merged.computeBoundingBox();
+  return merged;
+}
+const geoCache = new Map();
+const getGeo = t => { if (!geoCache.has(t.id)) geoCache.set(t.id, buildGeo(t)); return geoCache.get(t.id); };
+
+/* ───────────────────────── Materials ───────────────────────── */
+const matCache = new Map();
+function mat(ci) {
+  if (matCache.has(ci)) return matCache.get(ci);
+  const c = COLORS[ci]; let m;
+  if (c.finish === 'trans') {
+    m = new THREE.MeshPhysicalMaterial({ color: c.hex, roughness: 0.06, metalness: 0, transmission: 0.92, thickness: 0.7, ior: 1.49, clearcoat: 1, clearcoatRoughness: 0.04, attenuationColor: new THREE.Color(c.hex), attenuationDistance: 2.5 });
+  } else if (c.finish === 'metal') {
+    m = new THREE.MeshPhysicalMaterial({ color: c.hex, metalness: 0.85, roughness: c.rough, clearcoat: 0.6, clearcoatRoughness: 0.1, envMapIntensity: 1.4 });
+  } else {
+    m = new THREE.MeshPhysicalMaterial({ color: c.hex, roughness: 0.3, metalness: 0, clearcoat: 0.35, clearcoatRoughness: 0.22, specularIntensity: 0.6, envMapIntensity: 0.75 });
+  }
+  m.userData.clearcoat = m.clearcoat;  // full-quality values, so a lower graphics level can be undone
+  if (c.finish === 'trans') m.userData.transmission = m.transmission;
+  matCache.set(ci, m); tuneMat(m); return m;
+}
+// Lower graphics levels drop the clear coat and swap glassy see-through for plain transparency.
+function tuneMat(m) {
+  const rich = QUALITY[state.quality].rich, u = m.userData;
+  if (u.clearcoat !== undefined) m.clearcoat = rich ? u.clearcoat : 0;
+  if (u.transmission !== undefined) { m.transmission = rich ? u.transmission : 0; m.transparent = !rich; m.opacity = rich ? 1 : 0.6; }
+}
+
+/* ───────────────────────── TNT print ───────────────────────── */
+// A printed band on each side of a TNT brick. It's a child mesh, so clicks, paint and hover never touch it.
+const BAND_H = 0.46, BAND_INSET = 0.05;
+const bandMats = new Map(), bandGeos = new Map();
+function bandMat(aspect) {
+  const k = aspect.toFixed(2);
+  if (bandMats.has(k)) return bandMats.get(k);
+  const cv = document.createElement('canvas'); cv.height = 128; cv.width = Math.round(128 * aspect);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  const font = '800 78px "Bricolage Grotesque", "Arial Black", Impact, sans-serif';
+  const draw = () => {
+    const g = cv.getContext('2d'), W = cv.width, n = Math.max(1, Math.round(aspect / 3.6));
+    g.fillStyle = '#F4F1E8'; g.fillRect(0, 0, W, 128);
+    g.fillStyle = '#1B2A34'; g.fillRect(0, 0, W, 10); g.fillRect(0, 118, W, 10);
+    g.font = font; g.textAlign = 'center'; g.textBaseline = 'middle';
+    for (let i = 0; i < n; i++) g.fillText('TNT', W * (i + 0.5) / n, 68);
+    tex.needsUpdate = true;
+  };
+  draw();
+  document.fonts?.load(font).then(() => { draw(); scheduleThumbs(); }, () => {}); // redraw once the brand font is in
+  const m = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.3, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 });
+  bandMats.set(k, m); return m;
+}
+function band(t) {
+  if (bandGeos.has(t.id)) return bandGeos.get(t.id);
+  const y = (t.h * PLATE - GAP * 0.5) / 2, e = 0.004, fx = (t.w - GAP) / 2 + e, fz = (t.d - GAP) / 2 + e;
+  const lx = t.d - GAP - 2 * BAND_INSET, lz = t.w - GAP - 2 * BAND_INSET; // printable width of the ±X and ±Z sides
+  const faces = [[lx, Math.PI / 2, fx, 0], [lx, -Math.PI / 2, -fx, 0], [lz, 0, 0, fz], [lz, Math.PI, 0, -fz]].map(([len, ry, x, z]) => {
+    const g = new THREE.PlaneGeometry(len, BAND_H); g.rotateY(ry); g.translate(x, y, z); return g;
+  });
+  const out = { geo: mergeGeometries(faces, true), mats: [bandMat(lx / BAND_H), bandMat(lx / BAND_H), bandMat(lz / BAND_H), bandMat(lz / BAND_H)] };
+  bandGeos.set(t.id, out); return out;
+}
+function decorate(mesh, t) {
+  let b = mesh.userData.band;
+  if (t.kind !== 'tnt') { if (b) b.visible = false; return mesh; }
+  if (!b) { b = mesh.userData.band = new THREE.Mesh(); b.raycast = () => {}; b.receiveShadow = true; mesh.add(b); }
+  const { geo, mats } = band(t);
+  b.geometry = geo; b.material = mats; b.visible = true;
+  return mesh;
+}
+
+/* ───────────────────────── Baseplate ───────────────────────── */
+const baseMat = new THREE.MeshPhysicalMaterial({ color: BASES[0].hex, roughness: 0.42, clearcoat: 0.2, clearcoatRoughness: 0.3 });
+baseMat.userData.clearcoat = baseMat.clearcoat;
+const studLods = new Map(); // baseplate studs at each graphics level's detail
+const studsFor = seg => { if (!studLods.has(seg)) studLods.set(seg, studGeo(seg)); return studLods.get(seg); };
+const baseBody = new THREE.Mesh(new RoundedBoxGeometry(GRID, 0.24, GRID, 2, 0.08), baseMat);
+baseBody.position.y = -0.12; baseBody.receiveShadow = true; baseBody.castShadow = true; scene.add(baseBody);
+const baseStuds = new THREE.InstancedMesh(studsFor(24), baseMat, GRID * GRID);
+{
+  const m = new THREE.Matrix4(); let n = 0;
+  for (let x = -HALF; x < HALF; x++) for (let z = -HALF; z < HALF; z++) { m.makeTranslation(x + 0.5, 0, z + 0.5); baseStuds.setMatrixAt(n++, m); }
+  baseStuds.castShadow = true; baseStuds.receiveShadow = true; scene.add(baseStuds);
+}
+
+/* ───────────────────────── Physics world ───────────────────────── */
+const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -GRAVITY, 0) });
+world.broadphase = new CANNON.SAPBroadphase(world);
+world.allowSleep = true;
+world.solver.iterations = 12;
+world.defaultContactMaterial.friction = 0.42;
+world.defaultContactMaterial.restitution = 0.12;
+{
+  const plate = new CANNON.Body({ type: CANNON.Body.STATIC });
+  plate.addShape(new CANNON.Box(new CANNON.Vec3(HALF, 0.12, HALF)));
+  plate.position.set(0, -0.12, 0);
+  world.addBody(plate);
+  const floor = new CANNON.Body({ type: CANNON.Body.STATIC });
+  floor.addShape(new CANNON.Plane());
+  floor.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+  floor.position.set(0, -0.25, 0);
+  world.addBody(floor);
+}
+
+/* ───────────────────────── World state ───────────────────────── */
+// Snapped bricks live on the grid as static bodies. Anything knocked loose becomes
+// a dynamic "chunk": one rigid body made of the bricks that are still clicked together.
+const brickGroup = new THREE.Group(), debrisRoot = new THREE.Group(), fxGroup = new THREE.Group();
+scene.add(brickGroup, debrisRoot, fxGroup);
+const bricks = new Map();      // id → { data, mesh, body }
+const occ = new Map();         // "x,y,z" → id   (y in plate layers)
+const brokenLinks = new Set(); // "a|b" connections that have snapped (0 = baseplate)
+const debris = new Map();      // body.id → chunk { body, group, parts, links }
+const debrisParts = new Map(); // brick id → part (inside a chunk)
+let nextId = 1;
+const state = { tool: 'build', type: TYPE_BY_ID.b2x4, color: 0, rot: 0, turns: 0, sound: true, base: 0, clutch: 1, slowmo: false, quality: 2 };
+// Two players: js/multiplayer.js takes these over when server.js serves the game. The host's changes to the
+// world go out as ops (net.op); a guest's actions go to the host as commands (net.cmd) instead of happening here.
+const net = { guest: false, remoteSlow: false, canUndo: false, canRedo: false, op() {}, cmd() {}, say() {}, frame() {} };
+const chunks = new Map(); // network id → loose chunk, so both screens can name the same piece
+let lastNid = 0;
+const undoStack = [], redoStack = [];
+const anims = [];
+let hoverPrev = null, hoverDirty = true, pointerInside = false, timeScale = 1;
+
+const key = (x, y, z) => x + ',' + y + ',' + z;
+const dims = (t, rot) => (rot & 1) ? [t.d, t.w] : [t.w, t.d];
+const linkKey = (a, b) => a < b ? a + '|' + b : b + '|' + a;
+
+function cellsOf(d) {
+  const t = TYPE_BY_ID[d.type], [ew, ed] = dims(t, d.rot), out = [];
+  for (let x = 0; x < ew; x++) for (let z = 0; z < ed; z++) for (let y = 0; y < t.h; y++) out.push(key(d.x + x, d.y + y, d.z + z));
+  return out;
+}
+function fits(t, rot, x, y, z, ignore) {
+  const [ew, ed] = dims(t, rot);
+  if (x < -HALF || z < -HALF || x + ew > HALF || z + ed > HALF || y < 0 || y + t.h > MAXY) return false;
+  for (let i = 0; i < ew; i++) for (let k = 0; k < ed; k++) for (let j = 0; j < t.h; j++) {
+    const o = occ.get(key(x + i, y + j, z + k));
+    if (o !== undefined && o !== ignore) return false;
+  }
+  return true;
+}
+function placeMesh(mesh, t, d) {
+  const [ew, ed] = dims(t, d.rot);
+  mesh.position.set(d.x + ew / 2, d.y * PLATE, d.z + ed / 2);
+  mesh.rotation.y = -d.rot * Math.PI / 2;
+}
+function boxShape(t, rot) {
+  const [ew, ed] = dims(t, rot), H = t.h * PLATE;
+  return new CANNON.Box(new CANNON.Vec3((ew - 0.05) / 2, (H - 0.03) / 2, (ed - 0.05) / 2));
+}
+
+/* ─────────── Grid bricks ─────────── */
+function addBrick(data, animate = true, wake = true) {
+  const t = TYPE_BY_ID[data.type];
+  const mesh = decorate(new THREE.Mesh(getGeo(t), mat(data.color)), t);
+  mesh.castShadow = mesh.receiveShadow = true;
+  mesh.userData.id = data.id;
+  placeMesh(mesh, t, data);
+  brickGroup.add(mesh);
+  const [ew, ed] = dims(t, data.rot), H = t.h * PLATE;
+  const body = new CANNON.Body({ type: CANNON.Body.STATIC });
+  body.addShape(boxShape(t, data.rot));
+  body.position.set(data.x + ew / 2, data.y * PLATE + H / 2, data.z + ed / 2);
+  body.brickId = data.id;
+  world.addBody(body);
+  bricks.set(data.id, { data, mesh, body });
+  for (const k of cellsOf(data)) occ.set(k, data.id);
+  nextId = Math.max(nextId, data.id + 1);
+  net.op('+b', { ...data }, animate ? 1 : 0);
+  if (animate) {
+    const to = mesh.position.y; mesh.position.y += 0.9;
+    anims.push({ mesh, kind: 'drop', parent: brickGroup, t0: performance.now(), dur: 170, from: mesh.position.y, to });
+  }
+  if (wake) wakeDebris();
+}
+function detachGrid(id, pop = false) {
+  const b = bricks.get(id); if (!b) return null;
+  net.op('-b', id, pop ? 1 : 0);
+  clearHoverPreview();
+  for (const k of cellsOf(b.data)) if (occ.get(k) === id) occ.delete(k);
+  bricks.delete(id);
+  brickGroup.remove(b.mesh);
+  world.removeBody(b.body); b.body.__dead = true;
+  if (brokenLinks.size) for (const k of [...brokenLinks]) { const [a, c] = k.split('|'); if (+a === id || +c === id) brokenLinks.delete(k); }
+  return b;
+}
+function removeBrick(id, animate = true, wake = true) {
+  const b = detachGrid(id, animate); if (!b) return;
+  if (animate) popMesh(b.mesh);
+  if (wake) wakeDebris();
+}
+function popMesh(mesh) {
+  fxGroup.attach(mesh);
+  anims.push({ mesh, kind: 'pop', t0: performance.now(), dur: 150, y0: mesh.position.y, s0: mesh.scale.x });
+}
+function wakeDebris() { for (const c of debris.values()) c.body.wakeUp(); }
+
+/* ─────────── How bricks hold together ─────────── */
+// Does this brick have a stud on top of world cell (cx, cz)?
+function hasStudAt(d, cx, cz) {
+  const t = TYPE_BY_ID[d.type];
+  if (t.kind === 'tile') return false;
+  if (t.kind !== 'slope') return true;
+  const [ew, ed] = dims(t, d.rot);
+  const lx = cx + 0.5 - (d.x + ew / 2), lz = cz + 0.5 - (d.z + ed / 2), th = -d.rot * Math.PI / 2;
+  const canonZ = lx * Math.sin(th) + lz * Math.cos(th);
+  return Math.round(canonZ + t.d / 2 - 0.5) === t.d - 1; // only the back row of a slope has studs
+}
+// Every brick this one touches above or below, with connection strength in "studs".
+function linksOf(id) {
+  const d = bricks.get(id).data, t = TYPE_BY_ID[d.type], [ew, ed] = dims(t, d.rot);
+  const acc = new Map();
+  const add = (o, stud) => { let a = acc.get(o); if (!a) acc.set(o, a = { studs: 0, touch: 0 }); a.touch++; if (stud) a.studs++; };
+  for (let i = 0; i < ew; i++) for (let k = 0; k < ed; k++) {
+    const cx = d.x + i, cz = d.z + k;
+    if (d.y === 0) add(0, true);
+    else { const o = occ.get(key(cx, d.y - 1, cz)); if (o !== undefined) add(o, hasStudAt(bricks.get(o).data, cx, cz)); }
+    const up = occ.get(key(cx, d.y + t.h, cz)); if (up !== undefined) add(up, hasStudAt(d, cx, cz));
+  }
+  const out = [];
+  for (const [other, a] of acc) out.push({ other, u: a.studs || a.touch * PHYS.rest });
+  return out;
+}
+const intactLinks = id => linksOf(id).filter(l => !brokenLinks.has(linkKey(id, l.other)));
+function breakLink(k) { brokenLinks.add(k); net.op('L', k); }
+
+// Anything no longer connected to the baseplate turns into a falling chunk.
+function collapseCheck(seeds) {
+  const seen = new Set(), out = [];
+  for (const s of seeds) {
+    if (!s || !bricks.has(s) || seen.has(s)) continue;
+    const comp = [], stack = [s]; let grounded = false; seen.add(s);
+    while (stack.length) {
+      const u = stack.pop(); comp.push(u);
+      for (const l of intactLinks(u)) {
+        if (l.other === 0) { grounded = true; continue; }
+        if (!seen.has(l.other)) { seen.add(l.other); stack.push(l.other); }
+      }
+    }
+    if (!grounded) out.push(convertToDynamic(comp));
+  }
+  return out;
+}
+function convertToDynamic(ids) {
+  const idx = new Map(ids.map((id, i) => [id, i])), links = [];
+  for (const id of ids) for (const l of linksOf(id)) {
+    if (!l.other || id > l.other || !idx.has(l.other) || brokenLinks.has(linkKey(id, l.other))) continue;
+    links.push({ a: idx.get(id), b: idx.get(l.other), u: l.u });
+  }
+  let M = 0; const com = new THREE.Vector3();
+  const parts = ids.map(id => {
+    const b = detachGrid(id), t = TYPE_BY_ID[b.data.type], [ew, ed] = dims(t, b.data.rot), m = partMass(t);
+    const center = new THREE.Vector3(b.data.x + ew / 2, b.data.y * PLATE + t.h * PLATE / 2, b.data.z + ed / 2);
+    M += m; com.addScaledVector(center, m);
+    return { id, type: b.data.type, color: b.data.color, rot: b.data.rot, mesh: b.mesh, center };
+  });
+  com.divideScalar(M);
+  for (const p of parts) p.local = p.center.clone().sub(com);
+  wakeDebris();
+  return buildCompound(parts, links, com, new THREE.Quaternion());
+}
+
+/* ─────────── Loose chunks ─────────── */
+function buildCompound(parts, links, pos, quat, vel, ang, sleeping, nid) {
+  let M = 0; for (const p of parts) M += partMass(TYPE_BY_ID[p.type]);
+  const body = new CANNON.Body({ mass: M, linearDamping: 0.04, angularDamping: 0.12, sleepSpeedLimit: 0.4, sleepTimeLimit: 0.5 });
+  body.position.set(pos.x, pos.y, pos.z);
+  body.quaternion.set(quat.x, quat.y, quat.z, quat.w);
+  const group = new THREE.Group();
+  const c = { body, group, parts: [], links: links || [], nid: nid || ++lastNid };
+  lastNid = Math.max(lastNid, c.nid); chunks.set(c.nid, c);
+  for (const p of parts) {
+    const t = TYPE_BY_ID[p.type], H = t.h * PLATE, shape = boxShape(t, p.rot);
+    body.addShape(shape, new CANNON.Vec3(p.local.x, p.local.y, p.local.z));
+    const mesh = p.mesh || decorate(new THREE.Mesh(getGeo(t), mat(p.color)), t);
+    mesh.material = mat(p.color);
+    mesh.position.set(p.local.x, p.local.y - H / 2, p.local.z);
+    mesh.rotation.set(0, -p.rot * Math.PI / 2, 0);
+    mesh.scale.setScalar(1);
+    mesh.castShadow = mesh.receiveShadow = true;
+    mesh.userData.id = p.id;
+    group.add(mesh);
+    const part = { id: p.id, type: p.type, color: p.color, rot: p.rot, mesh, local: p.local.clone(), shape, c };
+    shape.__part = part;
+    c.parts.push(part);
+    debrisParts.set(p.id, part);
+    nextId = Math.max(nextId, p.id + 1);
+  }
+  if (vel) body.velocity.set(vel.x, vel.y, vel.z);
+  if (ang) body.angularVelocity.set(ang.x, ang.y, ang.z);
+  body.__c = c; body.__pv = body.velocity.clone();
+  world.addBody(body);
+  debris.set(body.id, c);
+  debrisRoot.add(group);
+  syncCompound(c);
+  if (sleeping) body.sleep();
+  net.op(...chunkOp(c));
+  return c;
+}
+function syncCompound(c) { c.group.position.copy(c.body.position); c.group.quaternion.copy(c.body.quaternion); }
+// A chunk the way the other screen needs it: its parts, how they hold together, and where it is.
+const chunkOp = c => ['+c', c.nid, c.parts.map(p => [p.id, p.type, p.color, p.rot, r4(p.local.x), r4(p.local.y), r4(p.local.z)]),
+  c.links.map(l => [l.a, l.b, r4(l.u)]), c.body.position.toArray().map(r4), c.body.quaternion.toArray().map(r4), c.body.sleepState === CANNON.Body.SLEEPING ? 1 : 0];
+function removeCompound(c) {
+  net.op('-c', c.nid); chunks.delete(c.nid);
+  clearHoverPreview();
+  world.removeBody(c.body); c.body.__dead = true;
+  debris.delete(c.body.id);
+  debrisRoot.remove(c.group);
+  for (const p of c.parts) if (debrisParts.get(p.id) === p) debrisParts.delete(p.id);
+}
+function components(n, links, skip = -1) {
+  const parent = Array.from({ length: n }, (_, i) => i);
+  const find = i => { while (parent[i] !== i) i = parent[i] = parent[parent[i]]; return i; };
+  for (const l of links) parent[find(l.a)] = find(l.b);
+  const groups = new Map();
+  for (let i = 0; i < n; i++) { if (i === skip) continue; const r = find(i); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(i); }
+  return [...groups.values()];
+}
+// Split a chunk into new rigid bodies that carry on with the same motion.
+function rebuildCompound(c, comps) {
+  const b = c.body;
+  const bp = new THREE.Vector3(b.position.x, b.position.y, b.position.z);
+  const q3 = new THREE.Quaternion(b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w);
+  const v = b.velocity.clone(), w = b.angularVelocity.clone();
+  const asleep = b.sleepState === CANNON.Body.SLEEPING;
+  removeCompound(c);
+  const out = [];
+  for (const comp of comps) {
+    const remap = new Map(comp.map((pi, j) => [pi, j]));
+    let M = 0; const lc = new THREE.Vector3();
+    for (const pi of comp) { const p = c.parts[pi], m = partMass(TYPE_BY_ID[p.type]); M += m; lc.addScaledVector(p.local, m); }
+    lc.divideScalar(M);
+    const wpos = lc.clone().applyQuaternion(q3).add(bp);
+    const vel = v.vadd(w.cross(new CANNON.Vec3(wpos.x - bp.x, wpos.y - bp.y, wpos.z - bp.z)));
+    const parts = comp.map(pi => { const p = c.parts[pi]; return { id: p.id, type: p.type, color: p.color, rot: p.rot, mesh: p.mesh, local: p.local.clone().sub(lc) }; });
+    const links = c.links.filter(l => remap.has(l.a) && remap.has(l.b)).map(l => ({ a: remap.get(l.a), b: remap.get(l.b), u: l.u }));
+    out.push(buildCompound(parts, links, wpos, q3, vel, w, asleep));
+  }
+  return out;
+}
+// Spread a shock through a chunk from the brick that got hit; weak connections snap.
+function fractureCompound(c, part, D) {
+  if (!c.links.length || c.body.__dead) return false;
+  const S = CLUTCH[state.clutch].s, start = c.parts.indexOf(part);
+  if (start < 0) return false;
+  const adj = c.parts.map(() => []);
+  c.links.forEach((l, i) => { adj[l.a].push(i); adj[l.b].push(i); });
+  const dmg = new Map([[start, D]]), queue = [start], broken = new Set();
+  while (queue.length) {
+    const u = queue.shift(), du = dmg.get(u);
+    for (const li of adj[u]) {
+      const l = c.links[li], o = l.a === u ? l.b : l.a;
+      if (!broken.has(li) && du * jitter() > l.u * S) broken.add(li);
+      if (!dmg.has(o) && du * PHYS.falloff > S * 0.05) { dmg.set(o, du * PHYS.falloff); queue.push(o); }
+    }
+  }
+  if (!broken.size) return false;
+  c.links = c.links.filter((_, i) => !broken.has(i));
+  const comps = components(c.parts.length, c.links);
+  if (comps.length < 2) return true;
+  for (const pc of rebuildCompound(c, comps)) {
+    const av = pc.body.angularVelocity;
+    av.set(av.x + (Math.random() - 0.5) * 3, av.y + (Math.random() - 0.5) * 3, av.z + (Math.random() - 0.5) * 3);
+  }
+  return true;
+}
+// Same idea for bricks still on the grid.
+function breakGrid(id, D) {
+  const S = CLUTCH[state.clutch].s, dmg = new Map([[id, D]]), queue = [id], seeds = [];
+  while (queue.length) {
+    const u = queue.shift(), du = dmg.get(u);
+    for (const l of linksOf(u)) {
+      const k = linkKey(u, l.other);
+      if (!brokenLinks.has(k) && du * jitter() > l.u * S) { breakLink(k); seeds.push(u); if (l.other) seeds.push(l.other); }
+      if (l.other && !dmg.has(l.other) && du * PHYS.falloff > S * 0.05) { dmg.set(l.other, du * PHYS.falloff); queue.push(l.other); }
+    }
+  }
+  return seeds;
+}
+function fractureGrid(id, J, dir, point, impactor, preVel) {
+  if (!bricks.has(id)) return false;
+  const seeds = breakGrid(id, J * PHYS.damage);
+  if (!seeds.length) return false;
+  const comps = collapseCheck(seeds);
+  for (const c of comps) {
+    const hit = c.parts.some(p => p.id === id), k = hit ? PHYS.push : 0.06;
+    const imp = new CANNON.Vec3(dir.x * J * k, dir.y * J * k, dir.z * J * k);
+    const rel = hit ? new CANNON.Vec3(point.x - c.body.position.x, point.y - c.body.position.y, point.z - c.body.position.z) : new CANNON.Vec3();
+    c.body.applyImpulse(imp, rel);
+  }
+  // the thrown part keeps going through instead of bouncing off a wall that just broke
+  if (comps.length && impactor && !impactor.__dead && preVel) impactor.velocity.set(preVel.x * PHYS.pass, preVel.y * PHYS.pass, preVel.z * PHYS.pass);
+  return true;
+}
+function removeDebrisPart(id, animate = true) {
+  const part = debrisParts.get(id); if (!part) return;
+  const c = part.c, idx = c.parts.indexOf(part);
+  clearHoverPreview();
+  if (animate) { net.op('pop', id); popMesh(part.mesh); } else c.group.remove(part.mesh);
+  c.links = c.links.filter(l => l.a !== idx && l.b !== idx);
+  const comps = components(c.parts.length, c.links, idx);
+  if (comps.length) rebuildCompound(c, comps); else removeCompound(c);
+  wakeDebris();
+}
+function partInfo(id) {
+  const g = bricks.get(id);
+  if (g) return { where: 'grid', type: g.data.type, color: g.data.color, rot: g.data.rot, mesh: g.mesh };
+  const p = debrisParts.get(id);
+  if (p) return { where: 'debris', type: p.type, color: p.color, rot: p.rot, mesh: p.mesh };
+  return null;
+}
+function recolor(id, ci) {
+  net.op('p', id, ci);
+  clearHoverPreview();
+  const g = bricks.get(id);
+  if (g) { g.data.color = ci; g.mesh.material = mat(ci); return; }
+  const p = debrisParts.get(id);
+  if (p) { p.color = ci; p.mesh.material = mat(ci); }
+}
+
+/* ─────────── Impacts: read real contact impulses from the solver ─────────── */
+const impacts = [], agg = new Map(), pairCool = new Map();
+world.addEventListener('postStep', () => {
+  agg.clear();
+  for (const eq of world.contacts) {
+    const J = eq.multiplier * world.dt;
+    if (!(J > 0.05)) continue;
+    const si = eq.si, sj = eq.sj;
+    const k = si.id < sj.id ? si.id + ':' + sj.id : sj.id + ':' + si.id;
+    let a = agg.get(k);
+    if (!a) {
+      a = { key: k, bi: eq.bi, bj: eq.bj, si, sj, J: 0, x: eq.bi.position.x + eq.ri.x, y: eq.bi.position.y + eq.ri.y, z: eq.bi.position.z + eq.ri.z };
+      agg.set(k, a);
+    }
+    a.J += J;
+  }
+  for (const a of agg.values()) {
+    const mi = a.bi.mass, mj = a.bj.mass, meff = mi && mj ? mi * mj / (mi + mj) : (mi || mj);
+    if (!meff || a.J / meff < PHYS.impactV) continue;
+    a.dv = a.J / meff;
+    a.pvi = a.bi.__pv ? a.bi.__pv.clone() : null;  // velocity just before this step
+    a.pvj = a.bj.__pv ? a.bj.__pv.clone() : null;
+    impacts.push(a);
+  }
+  for (const c of debris.values()) { const b = c.body; if (b.sleepState !== CANNON.Body.SLEEPING) b.__pv.copy(b.velocity); }
+});
+function processImpacts(now) {
+  if (!impacts.length) return;
+  const list = impacts.splice(0).sort((a, b) => b.J - a.J);
+  let crash = 0, clack = 0;
+  for (const a of list) {
+    if (a.bi.__dead || a.bj.__dead) continue;
+    const last = pairCool.get(a.key);
+    if (last && now - last < 120) continue;
+    pairCool.set(a.key, now);
+    const point = { x: a.x, y: a.y, z: a.z };
+    if (a.dv > TNT.trigger) shockNear(point);
+    let broke = false;
+    for (const [me, other, myShape, pvOther] of [[a.bi, a.bj, a.si, a.pvj], [a.bj, a.bi, a.sj, a.pvi]]) {
+      if (me.__dead) continue;
+      if (me.brickId) {
+        if (other.__c && pvOther) {
+          const sp = pvOther.length(), dir = sp > 0.1 ? pvOther.scale(1 / sp) : new CANNON.Vec3(0, -1, 0);
+          if (fractureGrid(me.brickId, a.J, dir, point, other, pvOther)) broke = true;
+        }
+      } else if (me.__c && myShape.__part && myShape.__part.c === me.__c) {
+        const part = myShape.__part;
+        if ((part.armed || a.dv > TNT.trigger) && isTNT(part.type)) ignite(part.id, 0);
+        if (fractureCompound(me.__c, part, a.J * PHYS.self)) broke = true;
+      }
+    }
+    if (broke) crash = Math.max(crash, a.J); else clack = Math.max(clack, a.J);
+  }
+  if (crash) sfx('crash', crash); else if (clack) sfx('clack', clack);
+  if (pairCool.size > 4000) pairCool.clear();
+}
+// Fast-moving parts get smaller time steps so nothing tunnels through a thin plate.
+let simAcc = 0;
+function stepPhysics(dt) {
+  let awake = false, v2 = 0;
+  for (const c of debris.values()) {
+    const b = c.body; if (b.sleepState === CANNON.Body.SLEEPING) continue;
+    awake = true; const v = b.velocity; v2 = Math.max(v2, v.x * v.x + v.y * v.y + v.z * v.z);
+  }
+  if (!awake) { simAcc = 0; return false; }
+  const h = Math.min(1 / 150, Math.max(1 / 720, 0.3 / Math.max(1, Math.sqrt(v2))));
+  simAcc += dt * timeScale;
+  let n = 0;
+  while (simAcc >= h && n < 16) { world.step(h); processImpacts(performance.now()); simAcc -= h; n++; }
+  if (n === 16) simAcc = 0;
+  for (const c of [...debris.values()]) {
+    const p = c.body.position;
+    if (p.y < -30 || Math.abs(p.x) > 140 || Math.abs(p.z) > 140) { removeCompound(c); continue; }
+    syncCompound(c);
+  }
+  return true;
+}
+
+/* ───────────────────────── Sound ───────────────────────── */
+let actx = null, noiseBuf = null, lastClack = 0;
+function audio() {
+  if (!actx) {
+    actx = new (window.AudioContext || window.webkitAudioContext)();
+    noiseBuf = actx.createBuffer(1, actx.sampleRate, actx.sampleRate);
+    const ch = noiseBuf.getChannelData(0);
+    for (let i = 0; i < ch.length; i++) ch[i] = Math.random() * 2 - 1;
+  }
+  return actx;
+}
+// iPads and phones only allow sound after a tap, and a second player's sounds arrive from the network
+// rather than from a tap, so wake the audio on every touch until it's running.
+addEventListener('pointerdown', () => { if (state.sound) try { if (audio().state !== 'running') actx.resume(); } catch (e) {} }, { passive: true });
+function burst(t, dur, freq, q, gain, sweepTo) {
+  const a = actx, src = a.createBufferSource(); src.buffer = noiseBuf;
+  const bp = a.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = q; bp.frequency.setValueAtTime(freq, t);
+  if (sweepTo) bp.frequency.exponentialRampToValueAtTime(sweepTo, t + dur);
+  const g = a.createGain(); g.gain.setValueAtTime(gain, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  src.connect(bp).connect(g).connect(a.destination);
+  src.start(t, Math.random() * 0.5); src.stop(t + dur + 0.02);
+}
+function tone(t, f0, f1, dur, gain) {
+  const a = actx, o = a.createOscillator(), g = a.createGain(); o.type = 'triangle';
+  o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + dur * 0.7);
+  g.gain.setValueAtTime(gain, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g).connect(a.destination); o.start(t); o.stop(t + dur + 0.02);
+}
+// A thump you feel, a rumble you hear, then bits landing. Deeper in slow motion.
+let boomBus = null;
+function boom(t, k) {
+  const a = actx, sl = timeScale < 1 ? 0.6 : 1, g = Math.min(1, 0.45 + 0.35 * k);
+  if (!boomBus) { // chain reactions stack up, so squash the peaks instead of clipping
+    boomBus = a.createDynamicsCompressor();
+    boomBus.threshold.value = -14; boomBus.ratio.value = 8; boomBus.attack.value = 0.002; boomBus.release.value = 0.25;
+    boomBus.connect(a.destination);
+  }
+  const o = a.createOscillator(), og = a.createGain(); o.type = 'sine';
+  o.frequency.setValueAtTime(150 * sl / Math.sqrt(k), t); o.frequency.exponentialRampToValueAtTime(36 * sl, t + 0.4 / sl);
+  og.gain.setValueAtTime(g, t); og.gain.exponentialRampToValueAtTime(0.0001, t + 0.75 / sl);
+  o.connect(og).connect(boomBus); o.start(t); o.stop(t + 0.8 / sl);
+  const src = a.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+  const lp = a.createBiquadFilter(); lp.type = 'lowpass';
+  lp.frequency.setValueAtTime(3000 * sl, t); lp.frequency.exponentialRampToValueAtTime(120 * sl, t + 1.2 / sl);
+  const ng = a.createGain(); ng.gain.setValueAtTime(g * 0.9, t); ng.gain.exponentialRampToValueAtTime(0.0001, t + 1.4 / sl);
+  src.connect(lp).connect(ng).connect(boomBus); src.start(t, Math.random() * 0.5); src.stop(t + 1.45 / sl);
+  for (let i = 0; i < 7; i++) burst(t + (0.05 + Math.random() * 0.5) / sl, 0.05, (900 + Math.random() * 3000) * sl, 1.5, g * 0.22 * Math.random());
+}
+function sfx(kind, k = 0) {
+  if (kind === 'clack') { const now = performance.now(); if (now - lastClack < 40) return; lastClack = now; }
+  if (kind !== 'rotate' && kind !== 'sizzle') net.op('s', kind, Math.round(k * 100) / 100); // the other player hears the world too
+  if (!state.sound) return;
+  try {
+    const t = audio().currentTime;
+    switch (kind) {
+      case 'add': burst(t, 0.05, 3200, 1.4, 0.55); tone(t, 1150, 380, 0.09, 0.16); break;
+      case 'remove': burst(t, 0.05, 1700, 1.4, 0.4); tone(t, 520, 200, 0.09, 0.16); break;
+      case 'paint': burst(t, 0.04, 2400, 1.2, 0.3); tone(t, 900, 1300, 0.09, 0.14); break;
+      case 'rotate': burst(t, 0.035, 4200, 2, 0.3); break;
+      case 'throw': burst(t, 0.28, 500, 0.8, 0.22, 2200); break;
+      case 'plunge': tone(t, 260, 70, 0.14, 0.14); burst(t, 0.07, 700, 1.2, 0.35); break;
+      case 'sizzle': burst(t, 0.03, 4500 + Math.random() * 3500, 1.2, 0.025 + Math.random() * 0.05); break;
+      case 'boom': boom(t, k); break;
+      case 'clack': burst(t, 0.045, 2200 + Math.random() * 2200, 2, Math.min(0.45, 0.06 + k * 0.006)); break;
+      case 'crash': {
+        const g = Math.min(0.85, 0.3 + k * 0.004);
+        for (let i = 0; i < 6; i++) burst(t + i * 0.022 + Math.random() * 0.02, 0.07, 1200 + Math.random() * 3000, 1.6, g * (1 - i * 0.13));
+        tone(t, 220, 90, 0.18, 0.12); break;
+      }
+    }
+  } catch (e) {}
+}
+
+/* ───────────────────────── TNT ───────────────────────── */
+// Fuses count down in simulation time, so slow motion stretches the countdown and the fireball too.
+const fuses = new Map(); // part id → { at, len, show }
+let simTime = 0, boomLit = false, lastSizzle = 0, blink = 0;
+const glowMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -8 });
+const fuseBox = new THREE.Box3();
+
+function ignite(id, delay, show = false) {
+  const at = simTime + delay, f = fuses.get(id);
+  if (f && f.at <= at) return;
+  if (f) f.at = at; else fuses.set(id, { at, len: Math.max(0.01, delay), show });
+  net.op('f', id, Math.round(delay * 1e4) / 1e4, show ? 1 : 0);
+}
+// A hard knock on TNT, on what's stacked on it, or on the ground right beside it sets it off.
+function shockNear(p) {
+  const cx = Math.floor(p.x), cy = Math.floor(p.y / PLATE), cz = Math.floor(p.z);
+  for (let x = cx - 1; x <= cx + 1; x++) for (let z = cz - 1; z <= cz + 1; z++) for (let y = cy - 2; y <= cy + 2; y++) {
+    const id = occ.get(key(x, y, z));
+    if (id !== undefined && isTNT(bricks.get(id).data.type)) ignite(id, 0);
+  }
+}
+function unlitTNT() {
+  const out = [];
+  for (const [id, b] of bricks) if (isTNT(b.data.type) && !fuses.has(id)) out.push(id);
+  for (const [id, p] of debrisParts) if (isTNT(p.type) && !fuses.has(id)) out.push(id);
+  return out;
+}
+function lightFuses() {
+  const ids = unlitTNT();
+  for (const id of ids) ignite(id, TNT.fuse + Math.random() * 0.35, true);
+  return ids.length;
+}
+function detonate() {
+  const n = unlitTNT().length;
+  if (!n) {
+    if (fuses.size) return;
+    selectType(TYPE_BY_ID.tnt2x2); if (state.tool !== 'build' && state.tool !== 'throw') setTool('build');
+    toast('Place some TNT first'); return;
+  }
+  if (net.guest) net.cmd('detonate'); else lightUp();
+  net.say(n > 1 ? `lit ${n} fuses` : 'lit a fuse');
+  toast(n > 1 ? `${n} fuses lit` : 'Fuse lit');
+  const btn = $('boomBtn'); btn.classList.remove('fire'); void btn.offsetWidth; btn.classList.add('fire');
+}
+function lightUp() {
+  const before = worldSnapshot();
+  lightFuses();
+  pushAction({ kind: 'boom', before });
+  sfx('plunge');
+}
+function updateFuses(now, sdt) {
+  let lit = false, kmax = 0;
+  if (fuses.size) {
+    const due = [];
+    for (const [id, f] of fuses) {
+      const info = partInfo(id);
+      if (!info) { fuses.delete(id); continue; } // removed before it went off
+      if (simTime >= f.at) { fuses.delete(id); due.push(id); continue; }
+      const k = Math.min(1, 1 - (f.at - simTime) / f.len);
+      info.mesh.scale.setScalar(1 + 0.08 * k * k + (REDUCED ? 0 : 0.02 * k * Math.sin(simTime * 45)));
+      if (f.show) { lit = true; kmax = Math.max(kmax, k); sizzle(info.mesh, sdt); glow(info.mesh); }
+    }
+    if (!net.guest) for (const id of due) explode(id); // a guest's fuses are for show; the host's ops do the damage
+    if (due.length) changed();
+    if (lit && now - lastSizzle > 45) { lastSizzle = now; sfx('sizzle'); }
+  }
+  blink += sdt * (10 + 30 * kmax); // blinks faster as the fuse burns down
+  glowMat.opacity = !lit ? 0 : REDUCED ? 0.25 : 0.45 * Math.max(0, Math.sin(blink));
+  if (boomLit !== fuses.size > 0) { boomLit = !boomLit; $('boomBtn').classList.toggle('on', boomLit); }
+}
+function glow(mesh) {
+  if (mesh.userData.glow) return;
+  const g = mesh.userData.glow = new THREE.Mesh(mesh.geometry, glowMat);
+  g.raycast = () => {}; mesh.add(g);
+}
+function sizzle(mesh, sdt) {
+  fuseBox.setFromObject(mesh);
+  const { min, max } = fuseBox, cx = (min.x + max.x) / 2, cz = (min.z + max.z) / 2;
+  for (let n = Math.floor(sdt * 110 * QUALITY[state.quality].fx + Math.random()); n > 0; n--) { // off the sides, so it shows with bricks stacked on top
+    let x = rnd(min.x, max.x), z = rnd(min.z, max.z);
+    if (Math.random() < 0.5) x = Math.random() < 0.5 ? min.x : max.x; else z = Math.random() < 0.5 ? min.z : max.z;
+    spawn(FX.spark, x, rnd(min.y + 0.2, max.y), z, (x - cx) * 3 + rnd(-1, 1), rnd(2, 6), (z - cz) * 3 + rnd(-1, 1),
+      { drag: 2, grav: 20, size: rnd(0.045, 0.08), life: rnd(0.2, 0.45) });
+  }
+}
+
+const cvA = new CANNON.Vec3(), cvB = new CANNON.Vec3();
+function debrisCenter(p, out) {
+  const b = p.c.body, w = b.quaternion.vmult(cvA.set(p.local.x, p.local.y, p.local.z), cvB);
+  return out.set(b.position.x + w.x, b.position.y + w.y, b.position.z + w.z);
+}
+function partCenter(id) {
+  const g = bricks.get(id), out = new THREE.Vector3();
+  if (!g) return debrisCenter(debrisParts.get(id), out);
+  const d = g.data, t = TYPE_BY_ID[d.type], [ew, ed] = dims(t, d.rot);
+  return out.set(d.x + ew / 2, (d.y + t.h / 2) * PLATE, d.z + ed / 2);
+}
+function distToBrick(o, d) {
+  const t = TYPE_BY_ID[d.type], [ew, ed] = dims(t, d.rot);
+  return Math.hypot(Math.max(d.x - o.x, 0, o.x - d.x - ew), Math.max(d.y * PLATE - o.y, 0, o.y - (d.y + t.h) * PLATE), Math.max(d.z - o.z, 0, o.z - d.z - ed));
+}
+function explode(id) {
+  const info = partInfo(id); if (!info) return;
+  const t = TYPE_BY_ID[info.type], k = Math.sqrt(t.w * t.d) / 2, o = partCenter(id); // k: 1×1 0.5, 2×2 1, 2×4 1.4
+  let seeds = [];
+  if (info.where === 'grid') { seeds = linksOf(id).map(l => l.other).filter(Boolean); detachGrid(id); }
+  else removeDebrisPart(id, false);
+  blast(o, k, seeds);
+  net.op('fx', r4(o.x), r4(o.y), r4(o.z), k);
+  boomFx(o, k);
+  sfx('boom', k);
+}
+// Snap the connections the blast reaches, let gravity take what's no longer held up,
+// then throw everything loose outward and up. Other TNT in reach goes off a beat later.
+const chainDelay = (d, R) => 0.06 + 0.16 * Math.min(1, d / R) + Math.random() * 0.05;
+function blast(o, k, seeds) {
+  const R = 2.6 + 2.6 * k, P = 120 * k, S = CLUTCH[state.clutch].s, older = [...debris.values()];
+  const hurt = d => P * Math.pow(1 - Math.min(1, d / R), 1.5);
+  for (const [id, b] of bricks) {
+    const d = distToBrick(o, b.data); if (d >= R) continue;
+    const D = hurt(d);
+    for (const l of linksOf(id)) {
+      const lk = linkKey(id, l.other);
+      if (!brokenLinks.has(lk) && D * jitter() > l.u * S) { breakLink(lk); seeds.push(id); if (l.other) seeds.push(l.other); }
+    }
+    if (isTNT(b.data.type)) ignite(id, chainDelay(d, R));
+  }
+  collapseCheck(seeds);
+  const at = new THREE.Vector3(), pt = new THREE.Vector3(), dir = new THREE.Vector3();
+  for (const c of older) { // chunks that were already loose crack apart too
+    if (c.body.__dead) continue;
+    let best = null, bd = R;
+    for (const p of c.parts) { const d = Math.max(0, debrisCenter(p, at).distanceTo(o) - 0.5); if (d < bd) { bd = d; best = p; } }
+    if (best) fractureCompound(c, best, hurt(bd));
+  }
+  const reach = R * 1.5;
+  for (const c of debris.values()) {
+    const b = c.body; let bd = reach;
+    for (const p of c.parts) {
+      const d = debrisCenter(p, at).distanceTo(o);
+      if (d < bd) { bd = d; pt.copy(at); }
+      if (d < R && isTNT(p.type)) ignite(p.id, chainDelay(d, R));
+    }
+    if (bd >= reach) continue;
+    const f = 1 - bd / reach, m = b.mass, light = Math.min(1, Math.sqrt(1.2 / m)), dv = (6 + 16 * k) * f * light;
+    dir.subVectors(pt, o); const L = dir.length();
+    if (L > 1e-3) dir.divideScalar(L); else dir.set(0, 1, 0);
+    dir.y += 0.5; dir.normalize();
+    b.wakeUp();
+    b.applyImpulse(new CANNON.Vec3(dir.x * dv * m, dir.y * dv * m, dir.z * dv * m), new CANNON.Vec3(pt.x - b.position.x, pt.y - b.position.y, pt.z - b.position.z));
+    const av = b.angularVelocity, s = 6 * f * light;
+    av.set(av.x + (Math.random() - 0.5) * s, av.y + (Math.random() - 0.5) * s, av.z + (Math.random() - 0.5) * s);
+  }
+}
+
+/* explosion effects: instanced, so even a long chain of blasts is three draw calls */
+const rnd = (a, b) => a + Math.random() * (b - a);
+const fxn = n => Math.round(n * QUALITY[state.quality].fx); // fewer particles on lower graphics levels
+const ramp = (...hex) => hex.map(h => new THREE.Color(h));
+function randomDir(v) { const y = Math.random() * 2 - 1, a = Math.random() * Math.PI * 2, r = Math.sqrt(1 - y * y); return v.set(r * Math.cos(a), y, r * Math.sin(a)); }
+function fxLayer(geo, material, max, colors, size) {
+  const mesh = new THREE.InstancedMesh(geo, material, max);
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(max * 3), 3).setUsage(THREE.DynamicDrawUsage);
+  mesh.count = 0; mesh.frustumCulled = false; scene.add(mesh);
+  return { mesh, max, colors, size, list: [] };
+}
+const puffGeo = new THREE.SphereGeometry(1, 18, 12);
+const FX = {
+  spark: fxLayer(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ toneMapped: false }), 1200,
+    ramp('#FFFBE6', '#FFD447', '#FF8A1F', '#D2380F'), t => Math.sqrt(1 - t)),
+  fire: fxLayer(puffGeo, new THREE.MeshBasicMaterial({ toneMapped: false }), 160,
+    ramp('#FFFDF2', '#FFE266', '#FFA024', '#E54A12', '#6B220D'), t => easeOutCubic(Math.min(1, t / 0.2)) * (1 - THREE.MathUtils.smoothstep(t, 0.4, 1))),
+  smoke: fxLayer(puffGeo, new THREE.MeshStandardMaterial({ roughness: 1 }), 500,
+    ramp('#4E4842', '#8C867E', '#C8C3BB', '#E6E2DC'), t => easeOutCubic(Math.min(1, t / 0.3)) * (1 - THREE.MathUtils.smoothstep(t, 0.5, 1))),
+};
+const DUST = ramp('#A2998C', '#C9C2B6', '#E4DFD6');
+const flash = new THREE.PointLight(0xffa64d, 0, 30, 2); // always in the scene, so the first blast doesn't stall on a shader rebuild
+scene.add(flash);
+let flashLevel = 0, shakeAmt = 0;
+function spawn(layer, x, y, z, vx, vy, vz, opts) {
+  if (layer.list.length >= layer.max) layer.list.shift();
+  layer.list.push({ x, y, z, vx, vy, vz, age: 0, drag: 1, grav: 0, size: 1, life: 1, colors: null, ...opts });
+}
+function boomFx(o, k) {
+  const d = new THREE.Vector3();
+  for (let i = fxn(5 + 8 * k); i > 0; i--) { // fireball
+    randomDir(d); d.y = Math.abs(d.y); const r = Math.random() * 0.7 * k, sp = rnd(1, 4.5);
+    spawn(FX.fire, o.x + d.x * r, o.y + d.y * r, o.z + d.z * r, d.x * sp, d.y * sp + 1, d.z * sp,
+      { drag: 3, grav: -3, size: rnd(0.6, 1.15) * (0.55 + 0.65 * k), life: rnd(0.35, 0.65), age: -Math.random() * 0.1 });
+  }
+  for (let i = fxn(8 + 14 * k); i > 0; i--) { // smoke rolling up
+    randomDir(d); d.y = Math.abs(d.y) * 0.8 + 0.2; const sp = rnd(2, 6) * (0.6 + 0.5 * k);
+    spawn(FX.smoke, o.x + d.x * 0.4 * k, o.y + d.y * 0.4 * k, o.z + d.z * 0.4 * k, d.x * sp, d.y * sp + 1.5, d.z * sp,
+      { drag: 2.4, grav: -2.4, size: rnd(0.45, 0.95) * (0.55 + 0.55 * k), life: rnd(1.1, 2.2), age: -rnd(0.04, 0.2) });
+  }
+  if (o.y < 2.5) { // a ring of dust along the ground
+    const n = fxn(10 + 10 * k), y = Math.abs(o.x) <= HALF && Math.abs(o.z) <= HALF ? 0.25 : 0;
+    for (let i = 0; i < n; i++) {
+      const a = (i + Math.random() * 0.5) / n * Math.PI * 2, sp = rnd(5, 9) * (0.6 + 0.4 * k);
+      spawn(FX.smoke, o.x + Math.cos(a) * 0.5 * k, y, o.z + Math.sin(a) * 0.5 * k, Math.cos(a) * sp, rnd(0.2, 1), Math.sin(a) * sp,
+        { drag: 3.2, grav: -0.5, size: rnd(0.3, 0.55) * (0.6 + 0.4 * k), life: rnd(0.8, 1.3), colors: DUST, age: -0.03 });
+    }
+  }
+  for (let i = fxn(25 + 45 * k); i > 0; i--) { // sparks
+    randomDir(d); d.y = d.y * 0.6 + 0.4; d.normalize(); const sp = rnd(7, 20) * (0.7 + 0.35 * k);
+    spawn(FX.spark, o.x, o.y, o.z, d.x * sp, d.y * sp, d.z * sp, { drag: 1.3, grav: 28, size: rnd(0.05, 0.09), life: rnd(0.4, 0.95) });
+  }
+  flash.position.set(o.x, o.y + 0.8, o.z); flashLevel = Math.min(2.5, flashLevel + k);
+  if (!REDUCED) shakeAmt = Math.min(1.2, shakeAmt + 0.5 * k * 40 / (40 + camera.position.distanceTo(o)));
+}
+const fxM = new THREE.Matrix4(), fxQ = new THREE.Quaternion(), fxS = new THREE.Vector3(), fxP = new THREE.Vector3(), fxD = new THREE.Vector3(), fxC = new THREE.Color();
+function rampAt(stops, t, out) {
+  const x = Math.min(0.9999, t) * (stops.length - 1), i = Math.floor(x);
+  return out.copy(stops[i]).lerp(stops[i + 1], x - i);
+}
+function updateFx(sdt) {
+  for (const layer of Object.values(FX)) {
+    const L = layer.list, mesh = layer.mesh, streak = layer === FX.spark;
+    if (!L.length && !mesh.count) continue;
+    let n = 0;
+    for (const p of L) {
+      p.age += sdt;
+      if (p.age >= p.life) continue;
+      if (p.age > 0) {
+        const dr = Math.exp(-p.drag * sdt);
+        p.vx *= dr; p.vy = p.vy * dr - p.grav * sdt; p.vz *= dr;
+        p.x += p.vx * sdt; p.y += p.vy * sdt; p.z += p.vz * sdt;
+        const floor = Math.abs(p.x) <= HALF && Math.abs(p.z) <= HALF ? 0.03 : -0.22;
+        if (p.y < floor) { p.y = floor; if (p.vy < 0) p.vy *= -0.3; p.vx *= 0.7; p.vz *= 0.7; }
+      }
+      const t = Math.max(0, p.age) / p.life, s = p.age > 0 ? p.size * layer.size(t) : 0;
+      if (streak) { // sparks stretch along their path
+        const sp = Math.hypot(p.vx, p.vy, p.vz);
+        fxQ.setFromUnitVectors(UP, fxD.set(p.vx, p.vy, p.vz).divideScalar(sp || 1)); fxS.set(s, s * (1 + sp * 0.06), s);
+      } else { fxQ.identity(); fxS.setScalar(s); }
+      mesh.setMatrixAt(n, fxM.compose(fxP.set(p.x, p.y, p.z), fxQ, fxS));
+      mesh.setColorAt(n, rampAt(p.colors || layer.colors, t, fxC));
+      L[n++] = p;
+    }
+    L.length = n; mesh.count = n;
+    mesh.instanceMatrix.needsUpdate = true; mesh.instanceColor.needsUpdate = true;
+  }
+  flash.intensity = flashLevel * (REDUCED ? 40 : 140);
+  flashLevel = flashLevel > 0.01 ? flashLevel * Math.exp(-sdt * 10) : 0;
+}
+const shakeOff = new THREE.Vector3();
+function cameraShake(now, dt) {
+  if (shakeAmt < 0.003) { shakeAmt = 0; return null; }
+  const s = shakeAmt * 0.45, t = now / 1000;
+  shakeOff.set(Math.sin(t * 57) * s, Math.sin(t * 43 + 1.7) * s, Math.sin(t * 51 + 3.1) * s);
+  shakeAmt *= Math.exp(-dt * 6);
+  return shakeOff;
+}
+
+/* ───────────────────────── History & saving ───────────────────────── */
+const r4 = v => Math.round(v * 1e4) / 1e4;
+function worldSnapshot() {
+  return {
+    bricks: [...bricks.values()].map(b => ({ ...b.data })),
+    broken: [...brokenLinks],
+    debris: [...debris.values()].map(c => {
+      const b = c.body;
+      return {
+        p: b.position.toArray().map(r4), q: b.quaternion.toArray().map(r4),
+        v: b.velocity.toArray().map(r4), w: b.angularVelocity.toArray().map(r4),
+        s: b.sleepState === CANNON.Body.SLEEPING,
+        parts: c.parts.map(p => ({ id: p.id, type: p.type, color: p.color, rot: p.rot, o: [r4(p.local.x), r4(p.local.y), r4(p.local.z)] })),
+        links: c.links.map(l => [l.a, l.b, r4(l.u)]),
+      };
+    }),
+  };
+}
+function restoreWorld(s) {
+  clearHoverPreview();
+  fuses.clear(); net.op('fc'); // snapshots never hold a lit fuse, so undo puts them out
+  for (const id of [...bricks.keys()]) removeBrick(id, false, false);
+  for (const c of [...debris.values()]) removeCompound(c);
+  brokenLinks.clear(); net.op('Lc');
+  for (const b of s.bricks) addBrick({ ...b }, false, false);
+  for (const k of s.broken || []) breakLink(k);
+  for (const d of s.debris || []) {
+    buildCompound(
+      d.parts.map(p => ({ id: p.id, type: p.type, color: p.color, rot: p.rot, local: new THREE.Vector3().fromArray(p.o) })),
+      (d.links || []).map(([a, b, u]) => ({ a, b, u })),
+      new THREE.Vector3().fromArray(d.p), new THREE.Quaternion().fromArray(d.q).normalize(),
+      d.v && new CANNON.Vec3(...d.v), d.w && new CANNON.Vec3(...d.w), d.s);
+  }
+}
+function pushAction(a) { undoStack.push(a); if (undoStack.length > 300) undoStack.shift(); redoStack.length = 0; changed(); }
+function commit(a) { apply(a, false); pushAction(a); }
+function apply(a, inverse) {
+  switch (a.kind) {
+    case 'add': inverse ? removeBrick(a.brick.id) : addBrick({ ...a.brick }); break;
+    case 'remove': if (inverse) { a.before ? restoreWorld(a.before) : addBrick({ ...a.brick }); } else eraseGridNow(a.brick.id); break;
+    case 'paint': recolor(a.id, inverse ? a.from : a.to); break;
+    case 'world': restoreWorld(inverse ? a.before : a.after); break;
+    case 'throw': inverse ? restoreWorld(a.before) : launch(a.params); break;
+    case 'debrisRemove': inverse ? restoreWorld(a.before) : removeDebrisPart(a.id); break;
+    case 'boom': inverse ? restoreWorld(a.before) : lightFuses(); break;
+  }
+}
+function undo() { const a = undoStack.pop(); if (!a) return; apply(a, true); redoStack.push(a); sfx('remove'); changed(); }
+// Undo and redo from the buttons or keys. With two players there is one shared history, kept by the host.
+function userUndo() {
+  if (!(net.guest ? net.canUndo : undoStack.length)) return;
+  if (net.guest) net.cmd('undo'); else undo();
+  net.say('pressed undo');
+}
+function userRedo() {
+  if (!(net.guest ? net.canRedo : redoStack.length)) return;
+  if (net.guest) net.cmd('redo'); else redo();
+  net.say('pressed redo');
+}
+function redo() {
+  const a = redoStack.pop(); if (!a) return;
+  const keep = redoStack.slice();
+  apply(a, false); undoStack.push(a);
+  redoStack.length = 0; if (a.kind !== 'throw' && a.kind !== 'boom') redoStack.push(...keep); // a replayed throw or blast lands differently
+  sfx('add'); changed();
+}
+function eraseGridNow(id) {
+  if (!bricks.has(id)) return [];
+  const neighbors = linksOf(id).map(l => l.other).filter(Boolean);
+  removeBrick(id, true);
+  return collapseCheck(neighbors);
+}
+function eraseGrid(id) {
+  if (net.guest) return net.cmd('eraseGrid', { id });
+  const b = bricks.get(id); if (!b) return;
+  const before = worldSnapshot(), data = { ...b.data };
+  const fell = eraseGridNow(id);
+  pushAction(fell.length ? { kind: 'remove', brick: data, before } : { kind: 'remove', brick: data });
+  sfx('remove');
+}
+function eraseDebris(id) {
+  if (net.guest) return net.cmd('eraseDebris', { id });
+  const before = worldSnapshot();
+  removeDebrisPart(id);
+  pushAction({ kind: 'debrisRemove', id, before });
+  sfx('remove');
+}
+
+let saveTimer = 0;
+function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 300); }
+function saveNow() { try { localStorage.setItem(STORE_KEY, JSON.stringify(serialize())); } catch (e) {} }
+const serialize = () => ({ app: 'brickyard', v: 2, base: state.base, clutch: state.clutch, world: worldSnapshot() });
+let shownLoose = -1;
+function updateCounts() {
+  let loose = 0; for (const c of debris.values()) loose += c.parts.length;
+  $('count').textContent = bricks.size;
+  if (loose === shownLoose) return;
+  shownLoose = loose;
+  $('loose').textContent = loose; $('looseWrap').hidden = !loose;
+  $('sweep').disabled = !loose;
+  $('sweep').textContent = loose ? `Clear loose pieces (${loose})` : 'No loose pieces';
+}
+function changed() {
+  updateCounts();
+  $('undo').disabled = !(net.guest ? net.canUndo : undoStack.length);
+  $('redo').disabled = !(net.guest ? net.canRedo : redoStack.length);
+  hoverDirty = true;
+  scheduleSave();
+  net.op('hist', undoStack.length > 0, redoStack.length > 0);
+}
+function parseModel(obj, startId = 1) {
+  if (!obj || typeof obj !== 'object') throw new Error('bad');
+  const w = obj.world || { bricks: obj.bricks, broken: [], debris: [] };
+  if (!Array.isArray(w.bricks)) throw new Error('bad');
+  const okColor = c => Number.isInteger(c) && !!COLORS[c];
+  const num = v => typeof v === 'number' && isFinite(v);
+  let id = startId; const remap = new Map(), bricksOut = [], used = new Set();
+  for (const b of w.bricks) {
+    const t = b && TYPE_BY_ID[b.type]; if (!t || !okColor(b.color)) continue;
+    const d = { id: id++, type: b.type, color: b.color, x: b.x | 0, y: b.y | 0, z: b.z | 0, rot: (b.rot | 0) & 3 };
+    const [ew, ed] = dims(t, d.rot);
+    if (d.x < -HALF || d.z < -HALF || d.x + ew > HALF || d.z + ed > HALF || d.y < 0 || d.y + t.h > MAXY) continue;
+    const cs = cellsOf(d); if (cs.some(k => used.has(k))) continue;
+    cs.forEach(k => used.add(k)); bricksOut.push(d);
+    if (b.id != null) remap.set(b.id, d.id);
+  }
+  const broken = [];
+  for (const k of Array.isArray(w.broken) ? w.broken : []) {
+    const [a, b] = String(k).split('|').map(Number);
+    const na = a === 0 ? 0 : remap.get(a), nb = remap.get(b);
+    if (na !== undefined && nb !== undefined) broken.push(linkKey(na, nb));
+  }
+  const debrisOut = [];
+  for (const d of Array.isArray(w.debris) ? w.debris : []) {
+    if (!d || !Array.isArray(d.p) || d.p.length !== 3 || !d.p.every(num) || !Array.isArray(d.q) || d.q.length !== 4 || !d.q.every(num) || !Array.isArray(d.parts)) continue;
+    const parts = [], pr = new Map();
+    d.parts.forEach((p, i) => {
+      if (!p || !TYPE_BY_ID[p.type] || !okColor(p.color) || !Array.isArray(p.o) || p.o.length !== 3 || !p.o.every(num)) return;
+      pr.set(i, parts.length); parts.push({ id: id++, type: p.type, color: p.color, rot: (p.rot | 0) & 3, o: p.o });
+    });
+    if (!parts.length) continue;
+    const links = (Array.isArray(d.links) ? d.links : [])
+      .filter(l => Array.isArray(l) && pr.has(l[0]) && pr.has(l[1]) && num(l[2]))
+      .map(l => [pr.get(l[0]), pr.get(l[1]), l[2]]);
+    debrisOut.push({ p: d.p, q: d.q, v: [0, 0, 0], w: [0, 0, 0], s: !!d.s, parts, links });
+  }
+  return {
+    base: Number.isInteger(obj.base) && BASES[obj.base] ? obj.base : 0,
+    clutch: Number.isInteger(obj.clutch) && CLUTCH[obj.clutch] ? obj.clutch : null,
+    world: { bricks: bricksOut, broken, debris: debrisOut },
+  };
+}
+
+/* ───────────────────────── Ghost & hover ───────────────────────── */
+const ghostMat = new THREE.MeshStandardMaterial({ transparent: true, opacity: 0.5, depthWrite: false, roughness: 0.35 });
+const ghost = new THREE.Mesh(getGeo(state.type), ghostMat);
+ghost.visible = false; ghost.renderOrder = 10; scene.add(ghost);
+const ghostTarget = new THREE.Vector3(); let ghostWasVisible = false;
+const outline = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)), new THREE.LineBasicMaterial({ color: 0xff3b30, transparent: true, depthTest: false }));
+outline.visible = false; outline.renderOrder = 20; scene.add(outline);
+const eraseMat = new THREE.MeshPhysicalMaterial({ color: '#ff5140', transparent: true, opacity: 0.55, roughness: 0.3, depthWrite: false });
+const tmpBox = new THREE.Box3(), tmpV = new THREE.Vector3();
+
+function setHoverPreview(mesh, color, material) { hoverPrev = { mesh, color }; mesh.material = material; }
+function clearHoverPreview() { if (!hoverPrev) return; hoverPrev.mesh.material = mat(hoverPrev.color); hoverPrev = null; }
+
+function syncGhostLook() {
+  ghost.geometry = getGeo(state.type);
+  const c = COLORS[state.color];
+  ghostMat.color.set(c.hex);
+  ghostMat.emissive.set(c.hex).multiplyScalar(0.25);
+  ghostMat.metalness = c.finish === 'metal' ? 0.8 : 0;
+  syncHeld();
+  hoverDirty = true;
+}
+
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+const mods = { shift: false, alt: false };
+function raycast(buildOnly) {
+  ray.setFromCamera(ndc, camera);
+  const list = buildOnly ? [baseBody, ...brickGroup.children] : [baseBody, ...brickGroup.children, ...debrisRoot.children];
+  return ray.intersectObjects(list, true)[0] || null;
+}
+function placementFor(hit) {
+  const t = state.type, rot = state.rot, [ew, ed] = dims(t, rot);
+  const n = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+  const p = hit.point.clone().addScaledVector(n, 0.05);
+  const side = Math.abs(n.y) < 0.5;
+  let x0 = (side && Math.abs(n.x) > 0.5) ? (n.x > 0 ? Math.floor(p.x) : Math.floor(p.x) - ew + 1) : Math.round(p.x - ew / 2);
+  let z0 = (side && Math.abs(n.z) > 0.5) ? (n.z > 0 ? Math.floor(p.z) : Math.floor(p.z) - ed + 1) : Math.round(p.z - ed / 2);
+  x0 = Math.min(Math.max(x0, -HALF), HALF - ew);
+  z0 = Math.min(Math.max(z0, -HALF), HALF - ed);
+  let y = Math.max(0, Math.floor(p.y / PLATE + 1e-4));
+  while (y + t.h <= MAXY && !fits(t, rot, x0, y, z0)) y++;   // climb out of anything solid
+  if (!fits(t, rot, x0, y, z0)) return null;
+  while (y > 0 && fits(t, rot, x0, y - 1, z0)) y--;           // settle onto whatever is below
+  return { x: x0, y, z: z0 };
+}
+const effectiveTool = () => mods.alt ? 'pick' : mods.shift ? 'erase' : state.tool;
+
+let ghostAt = null; // where the part in hand would snap on, so the other player can see it too
+function updateHover() {
+  clearHoverPreview();
+  let showGhost = false; outline.visible = false; ghostAt = null;
+  const tool = effectiveTool();
+  if (pointerInside && tool !== 'throw') {
+    const hit = raycast(tool === 'build');
+    if (hit && tool === 'build') {
+      const pl = placementFor(hit);
+      if (pl) {
+        const [ew, ed] = dims(state.type, state.rot);
+        ghostTarget.set(pl.x + ew / 2, pl.y * PLATE, pl.z + ed / 2);
+        if (!ghostWasVisible) { ghost.position.copy(ghostTarget); ghost.rotation.y = -state.turns * Math.PI / 2; }
+        showGhost = true; ghostAt = pl;
+      }
+    } else if (hit && hit.object.userData.id) {
+      const info = partInfo(hit.object.userData.id);
+      if (info) {
+        tmpBox.setFromObject(info.mesh);
+        tmpBox.getCenter(outline.position); tmpBox.getSize(tmpV);
+        outline.scale.set(tmpV.x + 0.08, tmpV.y + 0.08, tmpV.z + 0.08);
+        outline.material.color.set(tool === 'erase' ? 0xff3b30 : tool === 'paint' ? COLORS[state.color].hex : 0xF2CD37);
+        outline.visible = true;
+        if (tool === 'erase') setHoverPreview(info.mesh, info.color, eraseMat);
+        else if (tool === 'paint') setHoverPreview(info.mesh, info.color, mat(state.color));
+      }
+    }
+  }
+  ghost.visible = showGhost; ghostWasVisible = showGhost;
+  canvas.style.cursor = tool === 'throw' ? 'crosshair' : (showGhost || outline.visible ? 'pointer' : 'default');
+}
+
+/* ───────────────────────── The part in your hand & aiming ───────────────────────── */
+const heldScene = new THREE.Scene();
+heldScene.environment = scene.environment;
+heldScene.add(new THREE.HemisphereLight(0xffffff, 0x8d8474, 0.45));
+{ const l = new THREE.DirectionalLight(0xfff3e2, 2.4); l.position.set(16, 30, 12); heldScene.add(l); }
+const heldRig = new THREE.Group(), heldPivot = new THREE.Group(), heldMesh = new THREE.Mesh(getGeo(state.type), mat(0));
+heldRig.add(heldPivot); heldPivot.add(heldMesh); heldScene.add(heldRig); heldRig.visible = false;
+let heldYaw = 0, heldPop = 1, heldReadyAt = 0, heldScale = 1, heldCy = 0;
+const heldMats = new Map();
+function heldMat(ci) {
+  const c = COLORS[ci]; if (c.finish !== 'trans') return mat(ci);
+  if (!heldMats.has(ci)) heldMats.set(ci, new THREE.MeshPhysicalMaterial({ color: c.hex, transparent: true, opacity: 0.6, roughness: 0.05, clearcoat: 1 }));
+  return heldMats.get(ci);
+}
+function syncHeld() {
+  const g = getGeo(state.type), size = new THREE.Vector3(), ctr = new THREE.Vector3();
+  g.boundingBox.getSize(size); g.boundingBox.getCenter(ctr);
+  heldMesh.geometry = g; heldMesh.material = heldMat(state.color); decorate(heldMesh, state.type);
+  heldScale = Math.min(0.42, 0.7 / Math.max(size.x, size.y, size.z)); heldCy = ctr.y;
+}
+const easeOutCubic = x => 1 - Math.pow(1 - x, 3);
+const easeInBack = x => 2.7 * x * x * x - 1.7 * x * x;
+const easeOutBack = x => 1 + 2.70158 * Math.pow(x - 1, 3) + 1.70158 * Math.pow(x - 1, 2);
+const easeInOut = x => x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+
+function updateHeld(now, dt) {
+  heldRig.visible = state.tool === 'throw';
+  if (!heldRig.visible) return;
+  heldRig.position.copy(camera.position); heldRig.quaternion.copy(camera.quaternion);
+  const halfH = 4.6 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), halfW = halfH * camera.aspect;
+  const portrait = camera.aspect < 1, p = charge ? powerNow() : 0;
+  const bob = REDUCED ? 0 : Math.sin(now / 520) * 0.04;
+  const compact = innerWidth <= 1020; // the parts bar sits along the bottom on small screens
+  heldPivot.position.set(halfW * (portrait ? 0.3 : 0.66), -halfH * (portrait ? 0.3 : compact ? 0.22 : 0.34) + bob, -4.6 + p * 0.6);
+  heldYaw += (-state.turns * Math.PI / 2 - heldYaw) * Math.min(1, dt * 16);
+  heldPivot.rotation.set(-0.45 - p * 0.35, heldYaw + 0.6, -0.08);
+  if (now < heldReadyAt) { heldMesh.visible = false; heldPop = 0; }
+  else { heldMesh.visible = true; heldPop = Math.min(1, heldPop + dt / 0.22); }
+  const s = Math.max(0.001, heldScale * (portrait ? 0.6 : 1) * easeOutBack(heldPop));
+  heldMesh.scale.setScalar(s); heldMesh.position.set(0, -heldCy * s, 0);
+}
+
+const AIM_N = 44;
+const aimDots = new THREE.InstancedMesh(new THREE.SphereGeometry(0.075, 10, 8), new THREE.MeshBasicMaterial({ color: 0xF2CD37, toneMapped: false }), AIM_N);
+aimDots.frustumCulled = false; aimDots.visible = false; aimDots.renderOrder = 15; scene.add(aimDots);
+const aimRing = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.58, 48), new THREE.MeshBasicMaterial({ color: 0xF2CD37, toneMapped: false, side: THREE.DoubleSide, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }));
+aimRing.visible = false; aimRing.renderOrder = 16; scene.add(aimRing);
+const arcPts = Array.from({ length: 250 }, () => new THREE.Vector3()), arcSeg = new Float32Array(250);
+const tmpS = new THREE.Vector3(), tmpP = new THREE.Vector3(), tmpVel = new THREE.Vector3(), tmpN = new THREE.Vector3(), tmpL = new THREE.Vector3();
+const dotM = new THREE.Matrix4(), dotQ = new THREE.Quaternion(), dotS = new THREE.Vector3(), dotP = new THREE.Vector3();
+
+let charge = null;
+const powerNow = () => charge ? Math.min(1, (performance.now() - charge.t0) / 1000) : 0;
+
+function aimPoint() {
+  ray.setFromCamera(ndc, camera);
+  const hit = ray.intersectObjects([baseBody, ...brickGroup.children, ...debrisRoot.children], true)[0];
+  if (hit) return hit.point.clone();
+  const r = ray.ray;
+  if (r.direction.y < -1e-3) return r.at(-r.origin.y / r.direction.y, new THREE.Vector3());
+  return r.at(60, new THREE.Vector3());
+}
+// The throw always lands where you point: the slowest speed that reaches the target,
+// plus extra speed (a flatter, harder throw) the longer you hold.
+function launchVelocity(S, T, p) {
+  const dh = Math.hypot(T.x - S.x, T.z - S.z), dy = T.y - S.y, dist = Math.hypot(dh, dy);
+  const vReq = Math.sqrt(GRAVITY * Math.max(0.01, dy + dist));   // slowest speed that can reach at all
+  return ballistic(S, T, Math.min(MAX_SPEED, Math.max(12, vReq * 1.05, dist * 1.25) + 45 * p));
+}
+// Launch velocity for a given speed on the flatter of the two arcs, or a 45° lob if it can't reach.
+function ballistic(S, T, v) {
+  const dx = T.x - S.x, dy = T.y - S.y, dz = T.z - S.z, dh = Math.hypot(dx, dz), g = GRAVITY;
+  if (dh < 1e-3) return new THREE.Vector3(0, dy > 0 ? v : -v, 0);
+  const v2 = v * v, disc = v2 * v2 - g * (g * dh * dh + 2 * dy * v2);
+  const th = disc >= 0 ? Math.atan((v2 - Math.sqrt(disc)) / (g * dh)) : Math.PI / 4;
+  return new THREE.Vector3(dx / dh * v * Math.cos(th), v * Math.sin(th), dz / dh * v * Math.cos(th));
+}
+function solidAt(x, y, z) { const cy = Math.floor(y / PLATE); return cy >= 0 && occ.has(key(Math.floor(x), cy, Math.floor(z))); }
+function simulateArc(S, v0) {
+  const p = tmpP.copy(S), v = tmpVel.copy(v0), dt = 1 / 60;
+  let n = 0; arcPts[n++].copy(p);
+  for (let i = 0; i < 240; i++) {
+    const nx = p.x + v.x * dt, ny = p.y + v.y * dt, nz = p.z + v.z * dt;
+    v.y -= GRAVITY * dt;
+    const floorY = Math.abs(nx) <= HALF && Math.abs(nz) <= HALF ? 0 : -0.25;
+    if (ny <= floorY) {
+      const k = (p.y - floorY) / Math.max(1e-6, p.y - ny);
+      p.set(p.x + (nx - p.x) * k, floorY, p.z + (nz - p.z) * k);
+      arcPts[n++].copy(p); return { n, end: p, normal: UP };
+    }
+    if (solidAt(nx, ny, nz)) {
+      let ax = p.x, ay = p.y, az = p.z, bx = nx, by = ny, bz = nz;
+      for (let j = 0; j < 6; j++) {
+        const mx = (ax + bx) / 2, my = (ay + by) / 2, mz = (az + bz) / 2;
+        if (solidAt(mx, my, mz)) { bx = mx; by = my; bz = mz; } else { ax = mx; ay = my; az = mz; }
+      }
+      let normal = UP;
+      if (Math.floor(ay / PLATE) === Math.floor(by / PLATE)) normal = Math.floor(ax) !== Math.floor(bx) ? tmpN.set(Math.sign(ax - bx), 0, 0) : tmpN.set(0, 0, Math.sign(az - bz));
+      p.set(ax, ay, az); arcPts[n++].copy(p); return { n, end: p, normal };
+    }
+    p.set(nx, ny, nz); arcPts[n++].copy(p);
+  }
+  return { n, end: null, normal: UP };
+}
+function placeDots(n, now) {
+  let total = 0;
+  for (let i = 1; i < n; i++) { arcSeg[i] = arcPts[i].distanceTo(arcPts[i - 1]); total += arcSeg[i]; }
+  const spacing = Math.max(0.35, total / AIM_N), phase = REDUCED ? 0 : (now / 700) % 1;
+  let si = 1, acc = 0;
+  for (let d = 0; d < AIM_N; d++) {
+    const s = (d + phase) * spacing;
+    if (n < 2 || s > total) { dotM.makeScale(0, 0, 0); aimDots.setMatrixAt(d, dotM); continue; }
+    while (si < n - 1 && acc + arcSeg[si] < s) { acc += arcSeg[si]; si++; }
+    const k = arcSeg[si] > 0 ? Math.min(1, (s - acc) / arcSeg[si]) : 0;
+    dotP.lerpVectors(arcPts[si - 1], arcPts[si], k);
+    const sc = Math.min(1, s / 2.5) * (1 - 0.35 * (s / total));
+    dotS.setScalar(Math.max(0.001, sc)); dotM.compose(dotP, dotQ, dotS); aimDots.setMatrixAt(d, dotM);
+  }
+  aimDots.instanceMatrix.needsUpdate = true;
+}
+function updateAim(now) {
+  aimDots.visible = aimRing.visible = false;
+  if (state.tool !== 'throw' || !(pointerInside || charge) || now < heldReadyAt || mods.shift || mods.alt) return;
+  heldRig.updateMatrixWorld(true);
+  const S = heldPivot.getWorldPosition(tmpS);
+  const r = simulateArc(S, launchVelocity(S, aimPoint(), powerNow()));
+  placeDots(r.n, now); aimDots.visible = true;
+  if (r.end) {
+    aimRing.position.copy(r.end).addScaledVector(r.normal, 0.03);
+    aimRing.lookAt(tmpL.copy(r.end).add(r.normal));
+    aimRing.scale.setScalar(REDUCED ? 1 : 1 + 0.1 * Math.sin(now / 150));
+    aimRing.visible = true;
+  }
+}
+function throwParams(power) {
+  heldRig.updateMatrixWorld(true);
+  const S = heldPivot.getWorldPosition(new THREE.Vector3()), Q = heldPivot.getWorldQuaternion(new THREE.Quaternion());
+  for (let i = 0; i < 8 && solidAt(S.x, S.y, S.z); i++) S.lerp(camera.position, 0.2); // never spawn inside a wall
+  S.y = Math.max(S.y, state.type.h * PLATE + 0.4);
+  const v = launchVelocity(S, aimPoint(), power);
+  const spin = () => (Math.random() - 0.5) * 6;
+  return { type: state.type.id, color: state.color, pos: S.toArray(), quat: Q.toArray(), vel: v.toArray(), ang: [spin(), spin(), spin()], s0: heldScale };
+}
+function grow(mesh, s0) { mesh.scale.setScalar(s0); anims.push({ mesh, kind: 'grow', t0: performance.now(), dur: 180, s0 }); }
+function launch(p) {
+  const c = buildCompound([{ id: nextId++, type: p.type, color: p.color, rot: 0, local: new THREE.Vector3() }], [],
+    new THREE.Vector3().fromArray(p.pos), new THREE.Quaternion().fromArray(p.quat), new CANNON.Vec3(...p.vel), new CANNON.Vec3(...p.ang), false);
+  const s0 = p.s0 || 1;
+  c.parts[0].armed = true; // thrown TNT goes off on the first thing it hits
+  grow(c.parts[0].mesh, s0); net.op('grow', c.nid, s0);
+  sfx('throw');
+}
+function throwWith(params) {
+  const before = worldSnapshot();
+  launch(params);
+  pushAction({ kind: 'throw', before, params });
+}
+function throwNow(power) {
+  const params = throwParams(power);
+  if (net.guest) net.cmd('throw', { params }); else throwWith(params);
+  heldReadyAt = performance.now() + 280; heldPop = 0;
+}
+
+/* ───────────────────────── Input ───────────────────────── */
+function setPointer(e) {
+  const r = canvas.getBoundingClientRect();
+  ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+}
+let down = null, spaceHeld = false; const activePointers = new Set();
+const powerEl = $('power');
+function cancelCharge() { charge = null; powerEl.classList.remove('on'); }
+canvas.addEventListener('pointerenter', () => { pointerInside = true; hoverDirty = true; });
+canvas.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') { pointerInside = false; hoverDirty = true; } });
+canvas.addEventListener('pointermove', e => {
+  setPointer(e); pointerInside = true; hoverDirty = true;
+  if (charge) {
+    if (Math.hypot(e.clientX - charge.x, e.clientY - charge.y) > 8) cancelCharge(); // it's an orbit drag
+    else { powerEl.style.left = e.clientX + 'px'; powerEl.style.top = e.clientY + 'px'; }
+  }
+});
+canvas.addEventListener('pointerdown', e => {
+  activePointers.add(e.pointerId);
+  if (activePointers.size > 1) { down = null; cancelCharge(); return; }
+  setPointer(e); pointerInside = true;
+  down = { x: e.clientX, y: e.clientY, t: performance.now(), button: e.button, shift: e.shiftKey, alt: e.altKey };
+  if (state.tool === 'throw' && e.button === 0 && !e.shiftKey && !e.altKey && performance.now() >= heldReadyAt) {
+    charge = { t0: performance.now(), x: e.clientX, y: e.clientY };
+    powerEl.style.left = e.clientX + 'px'; powerEl.style.top = e.clientY + 'px'; powerEl.classList.add('on');
+  }
+});
+canvas.addEventListener('pointerup', e => {
+  activePointers.delete(e.pointerId);
+  if (!down) return;
+  const d = down; down = null;
+  const moved = Math.hypot(e.clientX - d.x, e.clientY - d.y);
+  if (charge) {
+    const p = powerNow(); cancelCharge();
+    if (moved <= 8) { setPointer(e); throwNow(p); }
+    if (e.pointerType !== 'mouse') pointerInside = false;
+    return;
+  }
+  if (moved > 6 || performance.now() - d.t > 600) return;
+  setPointer(e); pointerInside = true;
+  let tool = state.tool;
+  if (d.button === 2 || d.shift) tool = 'erase';
+  else if (d.alt) tool = 'pick';
+  else if (d.button !== 0) return;
+  if (tool !== 'throw') clickWith(tool);
+  if (e.pointerType !== 'mouse') pointerInside = false;
+  hoverDirty = true;
+});
+canvas.addEventListener('pointercancel', e => { activePointers.delete(e.pointerId); down = null; cancelCharge(); });
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+function clickWith(tool) {
+  clearHoverPreview();
+  const hit = raycast(tool === 'build'); if (!hit) return;
+  if (tool === 'build') {
+    const pl = placementFor(hit); if (!pl) return;
+    const brick = { id: nextId++, type: state.type.id, color: state.color, x: pl.x, y: pl.y, z: pl.z, rot: state.rot };
+    if (net.guest) return net.cmd('add', { brick }); // the host gives it an id and puts it on both screens
+    commit({ kind: 'add', brick });
+    sfx('add');
+    return;
+  }
+  const id = hit.object.userData.id, info = id && partInfo(id);
+  if (!info) return;
+  if (tool === 'erase') { info.where === 'grid' ? eraseGrid(id) : eraseDebris(id); }
+  else if (tool === 'paint') {
+    if (info.color === state.color) return;
+    if (net.guest) return net.cmd('paint', { id, color: state.color });
+    commit({ kind: 'paint', id, from: info.color, to: state.color }); sfx('paint');
+  }
+  else if (tool === 'pick') {
+    setRot(info.rot); selectColor(info.color); selectType(TYPE_BY_ID[info.type]); setTool('build');
+    toast(`Copied ${COLORS[info.color].name} ${partName(TYPE_BY_ID[info.type])}`);
+  }
+}
+function eraseHovered() {
+  if (!pointerInside) return;
+  const hit = raycast(false), id = hit && hit.object.userData.id, info = id && partInfo(id);
+  if (info) info.where === 'grid' ? eraseGrid(id) : eraseDebris(id);
+}
+
+// Shortcuts use e.code (the physical key), so they work whatever language the keyboard is set to.
+addEventListener('keydown', e => {
+  if (e.target.closest && e.target.closest('input')) return; // typing a game code, not playing
+  if (e.key === 'Shift' || e.key === 'Alt') { mods.shift = e.shiftKey; mods.alt = e.altKey; hoverDirty = true; if (e.key === 'Alt') e.preventDefault(); return; }
+  if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) { spaceHeld = true; updateSlow(); } return; }
+  if (!$('help').hidden) { if (e.key === 'Escape' || e.key === 'Enter') closeHelp(); return; }
+  if (e.key === 'Escape') { togglePop(null); return; }
+  const ctrl = e.ctrlKey || e.metaKey, code = e.code;
+  if (ctrl && code === 'KeyZ') { e.preventDefault(); e.shiftKey ? userRedo() : userUndo(); return; }
+  if (ctrl && code === 'KeyY') { e.preventDefault(); userRedo(); return; }
+  if (ctrl || e.altKey) return;
+  switch (code) {
+    case 'KeyR': rotate(e.shiftKey ? -1 : 1); break;
+    case 'KeyQ': rotate(-1); break;
+    case 'KeyB': setTool('build'); break;
+    case 'KeyT': setTool('throw'); break;
+    case 'KeyE': setTool('erase'); break;
+    case 'KeyP': setTool('paint'); break;
+    case 'KeyI': setTool('pick'); break;
+    case 'KeyF': case 'Home': resetView(); break;
+    case 'KeyH': openHelp(); break;
+    case 'KeyD': detonate(); break;
+    case 'BracketLeft': case 'BracketRight': selectColor((state.color + (code === 'BracketRight' ? 1 : -1) + COLORS.length) % COLORS.length); break;
+    case 'Comma': case 'Period': { const i = TYPES.indexOf(state.type); selectType(TYPES[(i + (code === 'Period' ? 1 : -1) + TYPES.length) % TYPES.length]); break; }
+    case 'KeyX': case 'Delete': case 'Backspace': eraseHovered(); break;
+    default: return;
+  }
+  e.preventDefault();
+});
+addEventListener('keyup', e => {
+  if (e.code === 'Space') { spaceHeld = false; updateSlow(); }
+  mods.shift = e.shiftKey; mods.alt = e.altKey; hoverDirty = true;
+});
+addEventListener('blur', () => { mods.shift = mods.alt = false; spaceHeld = false; updateSlow(); cancelCharge(); hoverDirty = true; });
+// Mouse clicks on buttons shouldn't leave them focused (Space would press them again).
+document.addEventListener('pointerup', e => { const b = e.target.closest && e.target.closest('button'); if (b && e.pointerType === 'mouse') b.blur(); });
+
+/* ───────────────────────── UI ───────────────────────── */
+const partName = t => {
+  if (t.kind === 'tnt') return `${t.label} TNT brick`;
+  if (t.group === 'Bricks') return `${t.label} brick`;
+  if (t.group === 'Plates') return `${t.label} plate`;
+  if (t.group === 'Tiles') return `${t.label} tile`;
+  if (t.group === 'Slopes') return `${t.label} slope`;
+  if (t.label.startsWith('Plate')) return `round ${t.label.toLowerCase()}`;
+  if (t.kind === 'round') return `${t.label} round brick`;
+  return t.label.toLowerCase();
+};
+const HINTS = {
+  build: '<b>Click</b> to snap the part on<br><b>R</b> or <b>Q</b> turns it<br><b>Shift+click</b> removes a part',
+  throw: '<b>Press and hold</b>, then let go to throw<br>Hold longer to throw harder<br><b>R</b> turns the part in your hand',
+  erase: '<b>Click</b> a part to remove it<br>Anything resting on it falls',
+  paint: '<b>Click</b> a part to paint it',
+  pick: '<b>Click</b> a part to copy its shape and color',
+};
+function updateHint() {
+  const tool = state.tool, tnt = isTNT(state.type.id) ? { build: '<br><b>D</b> lights every fuse', throw: '<br>Thrown TNT goes off where it lands' }[tool] : '';
+  $('hint').innerHTML = HINTS[tool] + (tnt || '') + '<span class="cam">Drag to orbit, right-drag to pan, scroll to zoom</span>';
+}
+function setTool(tool) {
+  state.tool = tool;
+  document.querySelectorAll('.tool').forEach(b => b.classList.toggle('on', b.dataset.tool === tool));
+  updateHint();
+  if (tool !== 'throw') cancelCharge();
+  hoverDirty = true;
+}
+document.querySelectorAll('.tool').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
+
+function rotate(dir = 1) {
+  state.turns += dir; state.rot = ((state.turns % 4) + 4) % 4;
+  sfx('rotate');
+  updateHover(); hoverDirty = false; // turn the held part right now, not next frame
+  const btn = $('rotate'); btn.classList.remove('spin'); void btn.offsetWidth; btn.classList.add('spin');
+}
+function setRot(r) {
+  let d = r - state.rot; if (d > 2) d -= 4; if (d < -2) d += 4;
+  state.turns += d; state.rot = r;
+}
+
+// Parts library
+const lib = $('lib'), partButtons = new Map();
+{
+  let grid = null, group = null;
+  for (const t of TYPES) {
+    if (t.group !== group) {
+      group = t.group;
+      const h = document.createElement('div'); h.className = 'group-name'; h.textContent = group; lib.appendChild(h);
+      grid = document.createElement('div'); grid.className = 'grid'; lib.appendChild(grid);
+    }
+    const b = document.createElement('button'); b.className = 'part'; b.title = partName(t);
+    b.setAttribute('aria-label', partName(t));
+    b.innerHTML = `<img alt=""><span>${t.label.replace('Plate ', '')}</span>`;
+    b.addEventListener('click', () => { selectType(t); if (state.tool !== 'build' && state.tool !== 'throw') setTool('build'); });
+    grid.appendChild(b); partButtons.set(t.id, b);
+  }
+}
+function selectType(t) {
+  state.type = t;
+  partButtons.forEach((b, id) => b.classList.toggle('on', id === t.id));
+  partButtons.get(t.id).scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  syncGhostLook(); updateHint();
+}
+
+// Colors
+const swButtons = [];
+COLORS.forEach((c, i) => {
+  const b = document.createElement('button');
+  b.className = 'sw' + (c.finish ? ' ' + c.finish : ''); b.style.setProperty('--c', c.hex);
+  b.title = c.name; b.setAttribute('aria-label', c.name);
+  b.addEventListener('click', () => selectColor(i));
+  $('swatches').appendChild(b); swButtons.push(b);
+});
+function selectColor(i) {
+  state.color = i;
+  swButtons.forEach((b, j) => b.classList.toggle('on', j === i));
+  swButtons[i].scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  const c = COLORS[i];
+  $('colorName').innerHTML = `${c.name}<small>${FINISH_LABEL[c.finish]}</small>`;
+  syncGhostLook(); scheduleThumbs();
+}
+
+// Popovers
+const POPS = { phys: ['physBtn', 'physPop'], more: ['moreBtn', 'morePop'], mp: ['mpBtn', 'mpPop'] };
+function togglePop(name) {
+  for (const [n, [b, p]] of Object.entries(POPS)) {
+    const open = n === name && $(p).hidden;
+    $(p).hidden = !open; $(b).classList.toggle('on', open); $(b).setAttribute('aria-expanded', String(open));
+  }
+}
+$('physBtn').onclick = () => togglePop('phys');
+$('moreBtn').onclick = () => togglePop('more');
+document.addEventListener('pointerdown', e => { if (!e.target.closest('.pop, #physBtn, #moreBtn, #mpBtn')) togglePop(null); }, true);
+
+function setClutch(i) {
+  state.clutch = i;
+  document.querySelectorAll('#clutchSeg button').forEach(b => b.classList.toggle('on', +b.dataset.v === i));
+  scheduleSave();
+  net.op('clutch', i);
+}
+document.querySelectorAll('#clutchSeg button').forEach(b => b.addEventListener('click', () => net.guest ? net.cmd('clutch', { i: +b.dataset.v }) : setClutch(+b.dataset.v)));
+// Slow motion is shared: either player holding Space slows the one world they're both in.
+function updateSlow() {
+  const mine = state.slowmo || spaceHeld;
+  if (net.guest) net.cmd('slow', { on: mine }); else setTimeScale(mine || net.remoteSlow ? 0.25 : 1);
+  $('slowSw').setAttribute('aria-checked', String(state.slowmo));
+}
+function setTimeScale(v) {
+  if (v !== timeScale) net.op('ts', v);
+  timeScale = v; $('slowBadge').hidden = v === 1;
+}
+$('slowSw').onclick = () => { state.slowmo = !state.slowmo; updateSlow(); };
+function sweepLoose() {
+  const before = worldSnapshot();
+  commit({ kind: 'world', before, after: { bricks: before.bricks, broken: before.broken, debris: [] } });
+  sfx('remove');
+}
+$('sweep').onclick = () => {
+  if (!debris.size) return;
+  if (net.guest) net.cmd('sweep'); else sweepLoose();
+  toast('Loose pieces cleared');
+};
+
+BASES.forEach((b, i) => {
+  const el = document.createElement('button');
+  el.className = 'sw'; el.style.setProperty('--c', b.hex);
+  el.title = b.name; el.setAttribute('aria-label', 'Baseplate ' + b.name);
+  el.onclick = () => { if (net.guest) return net.cmd('base', { i }); setBase(i); scheduleSave(); };
+  $('baseSw').appendChild(el);
+});
+function setBase(i) {
+  state.base = i; baseMat.color.set(BASES[i].hex);
+  [...$('baseSw').children].forEach((el, j) => el.classList.toggle('on', j === i));
+  net.op('base', i);
+}
+
+// Graphics level: sharpness, shadows, shine, baseplate detail and effects. Remembered per browser.
+const pixelRatio = () => { const [cap, k] = QUALITY[state.quality].res; return Math.min(devicePixelRatio, cap) * k; };
+function setQuality(i) {
+  state.quality = i; const q = QUALITY[i];
+  document.querySelectorAll('#gfxSeg button').forEach(b => b.classList.toggle('on', +b.dataset.v === i));
+  $('gfxNote').textContent = q.note;
+  renderer.setPixelRatio(pixelRatio());
+  renderer.shadowMap.enabled = sun.castShadow = q.shadow > 0;
+  renderer.shadowMap.type = q.soft ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+  if (sun.shadow.map && sun.shadow.mapSize.x !== q.shadow) { sun.shadow.map.dispose(); sun.shadow.map = null; }
+  if (q.shadow) sun.shadow.mapSize.set(q.shadow, q.shadow);
+  flash.visible = q.rich;
+  baseStuds.geometry = studsFor(q.studs);
+  [baseMat, ...matCache.values()].forEach(tuneMat);
+  // Shadow and shine changes need fresh shaders, including for parts that aren't on screen right now.
+  const all = new Set([eraseMat, ...matCache.values(), ...heldMats.values(), ...bandMats.values()]);
+  for (const s of [scene, heldScene]) s.traverse(o => { for (const m of [].concat(o.material || [])) all.add(m); });
+  for (const m of all) m.needsUpdate = true;
+  scheduleThumbs();
+}
+document.querySelectorAll('#gfxSeg button').forEach(b => b.addEventListener('click', () => {
+  setQuality(+b.dataset.v);
+  try { localStorage.setItem(GFX_KEY, b.dataset.v); } catch (e) {}
+}));
+
+$('undo').onclick = userUndo; $('redo').onclick = userRedo; $('rotate').onclick = () => rotate(1);
+$('view').onclick = resetView; $('photo').onclick = photo; $('boomBtn').onclick = detonate;
+$('save').onclick = () => {
+  togglePop(null);
+  download(new Blob([JSON.stringify(serialize())], { type: 'application/json' }), `brickyard-model-${stamp()}.json`);
+  toast('Model downloaded');
+};
+$('load').onclick = () => { togglePop(null); $('file').click(); };
+function openModel(obj) {
+  const m = parseModel(obj, nextId);
+  commit({ kind: 'world', before: worldSnapshot(), after: m.world });
+  setBase(m.base); if (m.clutch != null) setClutch(m.clutch);
+  return m;
+}
+$('file').onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  try {
+    const obj = JSON.parse(await f.text()), m = net.guest ? parseModel(obj) : openModel(obj);
+    if (net.guest) net.cmd('load', { model: obj });
+    net.say('opened a model');
+    toast(`Opened ${m.world.bricks.length + m.world.debris.reduce((s, d) => s + d.parts.length, 0)} bricks`);
+  } catch (err) { toast("That file isn't a Brickyard model"); }
+};
+function clearAll() {
+  commit({ kind: 'world', before: worldSnapshot(), after: { bricks: [], broken: [], debris: [] } });
+  sfx('remove');
+}
+$('clear').onclick = () => {
+  togglePop(null);
+  if (!bricks.size && !debris.size) return;
+  if (net.guest) net.cmd('clear'); else clearAll();
+  net.say('cleared everything. Ctrl+Z brings it back');
+  toast('Cleared. Ctrl+Z brings it back');
+};
+$('sound').onclick = () => {
+  state.sound = !state.sound;
+  $('sound').querySelector('.wave').style.display = state.sound ? '' : 'none';
+  $('sound').querySelector('.mute').style.display = state.sound ? 'none' : '';
+  $('sound').dataset.tip = state.sound ? 'Sound on' : 'Sound off';
+};
+function openHelp() { $('help').hidden = false; $('helpClose').focus(); }
+function closeHelp() { $('help').hidden = true; canvas.focus(); try { localStorage.setItem(HELP_KEY, '1'); } catch (e) {} }
+$('helpBtn').onclick = openHelp; $('helpClose').onclick = closeHelp;
+$('help').addEventListener('click', e => { if (e.target.id === 'help') closeHelp(); });
+
+let toastTimer = 0;
+function toast(msg) {
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 1900);
+}
+const stamp = () => new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+function download(blob, name) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+function photo() {
+  clearHoverPreview();
+  const vis = [ghost.visible, outline.visible, aimDots.visible, aimRing.visible];
+  ghost.visible = outline.visible = aimDots.visible = aimRing.visible = false;
+  renderer.clear(); renderer.render(scene, camera);
+  canvas.toBlob(b => { if (b) { download(b, `brickyard-${stamp()}.png`); toast('Photo saved'); } });
+  [ghost.visible, outline.visible, aimDots.visible, aimRing.visible] = vis;
+  hoverDirty = true;
+}
+let camTween = null;
+function resetView() { camTween = { t0: performance.now(), dur: 650, p0: camera.position.clone(), q0: controls.target.clone() }; }
+
+/* ───────────────────────── Live 3D thumbnails ───────────────────────── */
+const thumbR = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+thumbR.setPixelRatio(1); thumbR.setSize(112, 112);
+thumbR.outputColorSpace = THREE.SRGBColorSpace; thumbR.toneMapping = THREE.ACESFilmicToneMapping;
+const thumbScene = new THREE.Scene();
+thumbScene.environment = new THREE.PMREMGenerator(thumbR).fromScene(new RoomEnvironment(), 0.04).texture;
+thumbScene.add(new THREE.HemisphereLight(0xffffff, 0x777777, 0.6));
+{ const l = new THREE.DirectionalLight(0xffffff, 1.8); l.position.set(3, 6, 4); thumbScene.add(l); }
+const thumbCam = new THREE.PerspectiveCamera(24, 1, 0.1, 100);
+const thumbMesh = new THREE.Mesh(); thumbScene.add(thumbMesh);
+const thumbDir = new THREE.Vector3(1, 0.95, 1.35).normalize();
+let thumbQueued = false;
+function scheduleThumbs() { if (thumbQueued) return; thumbQueued = true; requestAnimationFrame(renderThumbs); }
+function renderThumbs() {
+  thumbQueued = false;
+  thumbMesh.material = mat(state.color);
+  for (const t of TYPES) {
+    const g = getGeo(t); thumbMesh.geometry = g; decorate(thumbMesh, t);
+    const s = g.boundingSphere;
+    const dist = s.radius / Math.sin(THREE.MathUtils.degToRad(thumbCam.fov / 2)) * 0.98;
+    thumbCam.position.copy(s.center).addScaledVector(thumbDir, dist); thumbCam.lookAt(s.center);
+    thumbR.render(thumbScene, thumbCam);
+    partButtons.get(t.id).querySelector('img').src = thumbR.domElement.toDataURL('image/png');
+  }
+}
+
+/* ───────────────────────── Starter scene ───────────────────────── */
+const C = Object.fromEntries(COLORS.map((c, i) => [c.name, i]));
+const DEMO = [
+  // a running-bond wall, made to be knocked down
+  ['b1x4','Bright Red',-6,0,-9,1], ['b1x4','Bright Red',-2,0,-9,1], ['b1x4','Bright Red',2,0,-9,1],
+  ['b1x2','White',-6,3,-9,1], ['b1x4','White',-4,3,-9,1], ['b1x4','White',0,3,-9,1], ['b1x2','White',4,3,-9,1],
+  ['b1x4','Bright Red',-6,6,-9,1], ['b1x4','Bright Red',-2,6,-9,1], ['b1x4','Bright Red',2,6,-9,1],
+  ['b1x2','White',-6,9,-9,1], ['b1x4','White',-4,9,-9,1], ['b1x4','White',0,9,-9,1], ['b1x2','White',4,9,-9,1],
+  // ...and something to knock it down with (press D)
+  ['tnt2x2','Bright Red',-1,0,-7,0],
+  // a tall tower
+  ['b2x2','Blue',8,0,-1,0], ['b2x2','Medium Azure',8,3,-1,0], ['b2x2','Blue',8,6,-1,0], ['b2x2','Medium Azure',8,9,-1,0],
+  ['b2x2','Blue',8,12,-1,0], ['b2x2','Medium Azure',8,15,-1,0], ['dome','Pearl Gold',8,18,-1,0],
+  // stepped block
+  ['b2x4','Bright Red',-12,0,-4,0], ['b2x4','Blue',-10,0,-4,0], ['b2x4','Bright Yellow',-12,3,-4,1], ['b2x4','Green',-12,3,-2,1],
+  ['b2x2','Orange',-11,6,-3,0], ['s2x2','Medium Azure',-11,9,-3,0],
+  // tree
+  ['r1x1','Reddish Brown',5,0,6,0], ['r1x1','Reddish Brown',5,3,6,0], ['r1x1','Reddish Brown',5,6,6,0],
+  ['p4x4','Green',3,9,4,0], ['b2x2','Green',4,10,5,0], ['dome','Lime',4,13,5,0],
+  // bits and pieces
+  ['p2x6','Dark Bluish Gray',-4,0,7,1], ['b1x2','White',-3,1,7,1], ['s1x2','Bright Red',-2,1,8,1],
+  ['r1x1','Trans Clear',1,0,-3,0], ['r1x1','Trans Light Blue',1,3,-3,0], ['cone','Pearl Gold',1,6,-3,0],
+  ['t2x2','Bright Yellow',-6,0,1,0], ['b1x4','Chrome Silver',11,0,5,0],
+];
+function loadDemo() {
+  for (const [type, color, x, y, z, rot] of DEMO) {
+    const t = TYPE_BY_ID[type];
+    if (fits(t, rot, x, y, z)) addBrick({ id: nextId++, type, color: C[color], x, y, z, rot }, false, false);
+  }
+}
+
+/* ───────────────────────── Boot ───────────────────────── */
+let restored = false;
+try { const g = localStorage.getItem(GFX_KEY); if (g !== null && QUALITY[+g]) state.quality = +g; } catch (e) {}
+try {
+  const raw = localStorage.getItem(STORE_KEY) || localStorage.getItem(OLD_KEY);
+  if (raw) {
+    const m = parseModel(JSON.parse(raw), 1);
+    restoreWorld(m.world); setBase(m.base); if (m.clutch != null) state.clutch = m.clutch;
+    collapseCheck([...bricks.keys()]);
+    restored = true;
+  }
+} catch (e) {}
+if (!restored) { loadDemo(); setBase(0); }
+
+selectType(state.type); selectColor(state.color); setTool('build'); setClutch(state.clutch); setQuality(state.quality); updateSlow();
+changed(); renderThumbs();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); homeFit();
+  renderer.setPixelRatio(pixelRatio()); renderer.setSize(innerWidth, innerHeight); // zoom or a new screen can change the pixel ratio
+});
+addEventListener('beforeunload', saveNow);
+controls.addEventListener('change', () => { hoverDirty = true; });
+
+let lastT = performance.now(), wasAwake = false;
+function loop(now) {
+  requestAnimationFrame(loop);
+  const dt = Math.min(0.05, Math.max(0, (now - lastT) / 1000)), sdt = dt * timeScale; lastT = now;
+  simTime += sdt;
+  if (camTween) {
+    const k = Math.min(1, (now - camTween.t0) / camTween.dur), e = easeInOut(k);
+    camera.position.lerpVectors(camTween.p0, HOME.pos, e);
+    controls.target.lerpVectors(camTween.q0, HOME.target, e);
+    if (k >= 1) camTween = null;
+  }
+  controls.update();
+  const awake = net.guest ? false : stepPhysics(dt); // a guest's loose pieces move to the host's positions instead
+  updateFuses(now, sdt);
+  if (awake) { hoverDirty = true; updateCounts(); }
+  if (wasAwake && !awake) scheduleSave();
+  wasAwake = awake;
+  if (hoverDirty) { hoverDirty = false; updateHover(); }
+  for (let i = anims.length - 1; i >= 0; i--) {
+    const a = anims[i], k = Math.min(1, (now - a.t0) / a.dur);
+    if (a.kind === 'drop') {
+      if (a.mesh.parent !== a.parent) { anims.splice(i, 1); continue; }
+      a.mesh.position.y = a.from + (a.to - a.from) * easeOutCubic(k);
+    } else if (a.kind === 'grow') {
+      a.mesh.scale.setScalar(a.s0 + (1 - a.s0) * easeOutCubic(k));
+    } else {
+      const s = Math.max(0.001, 1 - easeInBack(k));
+      a.mesh.scale.setScalar(a.s0 * s); a.mesh.position.y = a.y0 + k * 0.4;
+      if (k >= 1) fxGroup.remove(a.mesh);
+    }
+    if (k >= 1) anims.splice(i, 1);
+  }
+  if (ghost.visible) {
+    ghost.position.lerp(ghostTarget, Math.min(1, dt * 22));
+    ghost.rotation.y += (-state.turns * Math.PI / 2 - ghost.rotation.y) * Math.min(1, dt * 18);
+    ghostMat.opacity = REDUCED ? 0.5 : 0.42 + 0.1 * Math.sin(now / 260);
+  }
+  updateFx(sdt);
+  net.frame(dt, now);
+  const shake = cameraShake(now, dt); // nudge the camera for this frame only; the orbit controls never see it
+  if (shake) camera.position.add(shake);
+  updateHeld(now, dt);
+  updateAim(now);
+  if (charge) powerEl.style.setProperty('--p', powerNow().toFixed(3));
+  renderer.clear();
+  renderer.render(scene, camera);
+  if (heldRig.visible) { renderer.clearDepth(); renderer.render(heldScene, camera); }
+  if (shake) camera.position.sub(shake);
+}
+requestAnimationFrame(loop);
+
+window.__brickyard = { state, bricks, debris, world, camera };
+window.__brickyardReady = true;
+
+// Two players: when server.js serves the game, js/multiplayer.js links this browser with the other one.
+// Opened as a plain file there's no server, so the game stays solo.
+if (location.protocol.startsWith('http')) {
+  const game = {
+    THREE, scene, camera, controls, state, net, bricks, debris, debrisParts, chunks, brokenLinks, fuses, undoStack, redoStack,
+    TYPE_BY_ID, COLORS, BASES, CLUTCH, PLATE, dims, getGeo, fits, partInfo, chunkOp,
+    addBrick, detachGrid, removeBrick, recolor, buildCompound, removeCompound, popMesh, grow, restoreWorld, worldSnapshot,
+    commit, undo, redo, eraseGrid, eraseDebris, throwWith, lightUp, unlitTNT, sweepLoose, clearAll, openModel,
+    ignite, boomFx, sfx, setBase, setClutch, setTimeScale, updateSlow, toast, changed, togglePop, scheduleSave,
+    newId: () => nextId++, simTime: () => simTime, timeScale: () => timeScale, ghostAt: () => ghostAt, markHover: () => { hoverDirty = true; },
+  };
+  import('./js/multiplayer.js').then(m => m.start(game)).catch(() => {});
+}
+$('loader').classList.add('gone');
+setTimeout(() => $('loader').remove(), 600);
+try { if (!localStorage.getItem(HELP_KEY)) setTimeout(openHelp, 500); } catch (e) {}
+</script>
+</body>
+</html>
