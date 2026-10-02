@@ -29,16 +29,16 @@
   }
 }
 *{box-sizing:border-box}
-html,body{height:100%;margin:0}
+html,body{height:100%;margin:0; touch-action:pan-x pan-y; overscroll-behavior:none} /* a stray pinch, double tap or pull on a panel shouldn't zoom or reload the page */
 body{
   background:radial-gradient(120% 90% at 50% 18%, var(--bg1), var(--bg2));
   color:var(--ink);
   font-family:'Bricolage Grotesque', ui-rounded, 'SF Pro Rounded', 'Segoe UI', system-ui, sans-serif;
   font-size:14px; line-height:1.35;
-  overflow:hidden; -webkit-font-smoothing:antialiased; user-select:none; -webkit-user-select:none;
+  overflow:hidden; -webkit-font-smoothing:antialiased; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none;
 }
 #c{position:fixed; inset:0; width:100%; height:100%; display:block; touch-action:none; outline:none}
-button{font:inherit; color:inherit; border:0; background:none; cursor:pointer; -webkit-tap-highlight-color:transparent}
+button{font:inherit; color:inherit; border:0; background:none; cursor:pointer; -webkit-tap-highlight-color:transparent; touch-action:manipulation}
 button:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
 .panel{
   position:fixed; background:var(--paper);
@@ -177,6 +177,19 @@ svg.i{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.9;
 .mp-join .wide{width:auto; padding:10px 18px}
 #mpLeave{margin-top:8px}
 
+/* touch: the pad for nudging and placing a part */
+.place-bar{bottom:calc(78px + var(--safe-b)); left:50%; transform:translateX(-50%); border-radius:var(--r-lg); padding:8px; display:flex; align-items:center; gap:10px; z-index:5}
+.place-bar[hidden]{display:none}
+.pad{display:grid; grid-template-columns:repeat(3,46px); grid-template-rows:repeat(2,46px); gap:4px} /* turn, away, cancel / left, closer, right */
+.pb{width:46px; height:46px; display:grid; place-items:center; border-radius:var(--r-md); background:var(--hover)}
+.pb:active{background:var(--line)}
+.pb.alt{background:none; box-shadow:inset 0 0 0 1.5px var(--line); color:var(--ink-2)} /* outlined, so they don't read as arrows */
+.pb.alt:active{background:var(--hover)}
+.pb-place{height:96px; padding:0 18px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; border-radius:var(--r-md); background:var(--accent); color:var(--accent-ink); font-weight:800}
+.pb-place:active{filter:brightness(.94)}
+body.placing #toast{bottom:calc(196px + var(--safe-b))}
+@media (pointer: coarse){ .sw{width:34px; height:34px} }
+
 /* modal */
 .modal{position:fixed; inset:0; display:grid; place-items:center; background:rgba(10,15,20,.35); z-index:30; padding:20px}
 .modal[hidden]{display:none}
@@ -219,7 +232,34 @@ svg.i{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.9;
   .palette{bottom:calc(10px + var(--safe-b)); padding:6px 8px}
   .color-name, .count{display:none}
   #toast{bottom:calc(178px + var(--safe-b))}
+  .place-bar{bottom:calc(174px + var(--safe-b))}
+  body.placing #toast{bottom:calc(296px + var(--safe-b))}
 }
+/* phones: the pad keeps to the left, clear of the buttons down the right edge */
+@media (max-width: 600px){ .place-bar{left:calc(10px + var(--safe-l)); transform:none} }
+/* short screens, like a phone in Safari: the side buttons go two across so they end above the parts */
+@media (max-width: 1020px) and (max-height: 699px){
+  .topbar .actions{display:grid; grid-auto-flow:column; grid-template-rows:repeat(5, 40px)}
+  .act.sep{margin:0}
+  .act.sep::before{display:none}
+  .pop{right:calc(110px + var(--safe-r)); width:min(300px, calc(100vw - 130px)); max-height:calc(100% - 140px - var(--safe-t)); overflow-y:auto}
+}
+/* a phone on its side: parts down the left, buttons and the pad down the right, the middle free for building */
+@media (max-width: 1020px) and (max-height: 500px){
+  .topbar{flex-direction:row; justify-content:flex-start}
+  .topbar .actions{top:calc(14px + var(--safe-t)); grid-template-rows:repeat(4, 40px)}
+  .pop{top:calc(14px + var(--safe-t)); right:calc(156px + var(--safe-r)); max-height:calc(100% - 28px - var(--safe-t) - var(--safe-b))}
+  #mpPop{top:calc(80px + var(--safe-t)); max-height:calc(100% - 94px - var(--safe-t) - var(--safe-b))}
+  .badge{top:calc(80px + var(--safe-t)); left:calc(110px + var(--safe-l))}
+  .library{top:calc(80px + var(--safe-t)); bottom:calc(10px + var(--safe-b)); right:auto; width:88px; height:auto}
+  .lib-scroll{display:block; overflow-x:hidden; overflow-y:auto}
+  .grid{display:grid; grid-template-columns:1fr}
+  .part{width:auto}
+  .palette{left:calc(106px + var(--safe-l)); transform:none; max-width:calc(100vw - 380px - var(--safe-l) - var(--safe-r))}
+  .place-bar{left:auto; right:calc(10px + var(--safe-r)); transform:none; bottom:calc(10px + var(--safe-b))}
+  #toast, body.placing #toast{bottom:calc(70px + var(--safe-b))}
+}
+@media (max-width: 720px) and (max-height: 500px){ .logo{font-size:0; gap:0} } /* just the mark, so the tools still fit beside it */
 </style>
 <script type="importmap">
 { "imports": {
@@ -268,7 +308,7 @@ svg.i{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.9;
   </div>
   <div class="row"><span>Slow motion<small>Or hold Space</small></span><button class="switch" id="slowSw" role="switch" aria-checked="false" aria-label="Slow motion"></button></div>
   <button class="wide" id="sweep" disabled>No loose pieces</button>
-  <p class="note">Pick the Throw tool (T), then press and hold to throw harder. Ctrl+Z puts everything back together.</p>
+  <p class="note">Pick the Throw tool, then press and hold to throw harder. Undo puts everything back together.</p>
 </div>
 
 <div class="panel pop" id="morePop" hidden role="menu" aria-label="More">
@@ -306,6 +346,17 @@ svg.i{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.9;
   <div class="swatches" id="swatches"></div>
 </footer>
 
+<div class="panel place-bar" id="placeBar" hidden role="toolbar" aria-label="Place the part">
+  <div class="pad">
+    <button class="pb alt" id="pbTurn" aria-label="Turn the part"><svg class="i" viewBox="0 0 24 24"><path d="M20.5 12a8.5 8.5 0 1 1-2.8-6.3"/><path d="M20.5 3.5v5.5H15"/></svg></button>
+    <button class="pb" data-nudge="away" aria-label="Move away"><svg class="i" viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></button>
+    <button class="pb alt" id="pbCancel" aria-label="Cancel"><svg class="i" viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17"/></svg></button>
+    <button class="pb" data-nudge="left" aria-label="Move left"><svg class="i" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+    <button class="pb" data-nudge="near" aria-label="Move closer"><svg class="i" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+    <button class="pb" data-nudge="right" aria-label="Move right"><svg class="i" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+  </div>
+  <button class="pb-place" id="pbPlace"><svg class="i" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Place</button>
+</div>
 <div class="hint" id="hint"></div>
 <div class="power" id="power"></div>
 <div id="toast" role="status" aria-live="polite"></div>
@@ -315,7 +366,7 @@ svg.i{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.9;
     <h2 id="helpTitle">How to build</h2>
     <p>Parts snap to the stud grid and click onto whatever is underneath. Knock things over with the Throw tool. Your model saves itself in this browser.</p>
     <table>
-      <tr><td>Place a part</td><td>Click, or tap on a touch screen</td></tr>
+      <tr><td>Place a part</td><td>Click. On a touch screen, tap to aim and tap again to place</td></tr>
       <tr><td>Turn the part</td><td>R, or Q for the other way. Works with any keyboard language</td></tr>
       <tr><td>Throw</td><td>Throw tool (T): press and hold, then let go. Hold longer to throw harder</td></tr>
       <tr><td>TNT</td><td>Build it in, then press D to light the fuses. A hard hit sets it off too, so try throwing it</td></tr>
@@ -325,6 +376,7 @@ svg.i{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.9;
       <tr><td>Slow motion</td><td>Hold Space</td></tr>
       <tr><td>Next part or color</td><td>, and . for parts, [ and ] for colors</td></tr>
       <tr><td>Camera</td><td>Drag to orbit, right-drag to pan, scroll to zoom, F to reset</td></tr>
+      <tr><td>Touch screens</td><td>Tap to choose a spot, then tap the part again or press Place. The arrows move it one stud, and you can drag it to slide it. Pinch to zoom</td></tr>
       <tr><td>Play together</td><td>Tap Play together at the top: one player starts a game, the other joins with its code. Or run play-together.bat to play over your own WiFi</td></tr>
       <tr><td>Undo, redo</td><td>Ctrl+Z, Ctrl+Y. Undo also rebuilds what you knocked down</td></tr>
     </table>
@@ -1553,20 +1605,43 @@ function placementFor(hit) {
   let z0 = (side && Math.abs(n.z) > 0.5) ? (n.z > 0 ? Math.floor(p.z) : Math.floor(p.z) - ed + 1) : Math.round(p.z - ed / 2);
   x0 = Math.min(Math.max(x0, -HALF), HALF - ew);
   z0 = Math.min(Math.max(z0, -HALF), HALF - ed);
-  let y = Math.max(0, Math.floor(p.y / PLATE + 1e-4));
-  while (y + t.h <= MAXY && !fits(t, rot, x0, y, z0)) y++;   // climb out of anything solid
-  if (!fits(t, rot, x0, y, z0)) return null;
-  while (y > 0 && fits(t, rot, x0, y - 1, z0)) y--;           // settle onto whatever is below
-  return { x: x0, y, z: z0 };
+  const y = settleAt(t, rot, x0, Math.max(0, Math.floor(p.y / PLATE + 1e-4)), z0);
+  return y === null ? null : { x: x0, y, z: z0 };
+}
+// Where a part at (x, z) comes to rest: climb out of anything solid, then settle onto whatever is below.
+function settleAt(t, rot, x, y, z) {
+  while (y + t.h <= MAXY && !fits(t, rot, x, y, z)) y++;
+  if (!fits(t, rot, x, y, z)) return null;
+  while (y > 0 && fits(t, rot, x, y - 1, z)) y--;
+  return y;
 }
 const effectiveTool = () => mods.alt ? 'pick' : mods.shift ? 'erase' : state.tool;
 
+// A finger hides what it points at, so touch screens build in two steps: tap to aim, then nudge,
+// turn or drag the waiting part, and tap it again (or press Place) to put it there.
+let touchMode = matchMedia('(pointer: coarse)').matches; // the last input was a finger or pen, not a mouse
+let pending = null; // the waiting part's spot { x, y, z }
 let ghostAt = null; // where the part in hand would snap on, so the other player can see it too
+// Keep the waiting part on the board and resting on whatever is there now (parts come and go).
+function keepPending() {
+  const t = state.type, [ew, ed] = dims(t, state.rot);
+  const x = Math.min(Math.max(pending.x, -HALF), HALF - ew), z = Math.min(Math.max(pending.z, -HALF), HALF - ed);
+  const y = settleAt(t, state.rot, x, pending.y, z);
+  pending = y === null ? null : { x, y, z };
+  return !!pending;
+}
 function updateHover() {
   clearHoverPreview();
   let showGhost = false; outline.visible = false; ghostAt = null;
   const tool = effectiveTool();
-  if (pointerInside && tool !== 'throw') {
+  if (pending && tool === 'build' && keepPending()) {
+    const t = state.type, [ew, ed] = dims(t, state.rot);
+    ghostTarget.set(pending.x + ew / 2, pending.y * PLATE, pending.z + ed / 2);
+    if (!ghostWasVisible) { ghost.position.copy(ghostTarget); ghost.rotation.y = -state.turns * Math.PI / 2; }
+    outline.scale.set(ew + 0.1, t.h * PLATE + 0.1, ed + 0.1); // follows the ghost in the loop
+    outline.material.color.set(0xF2CD37); outline.visible = true;
+    showGhost = true; ghostAt = pending;
+  } else if (pointerInside && !touchMode && tool !== 'throw') {
     const hit = raycast(tool === 'build');
     if (hit && tool === 'build') {
       const pl = placementFor(hit);
@@ -1591,6 +1666,8 @@ function updateHover() {
   }
   ghost.visible = showGhost; ghostWasVisible = showGhost;
   canvas.style.cursor = tool === 'throw' ? 'crosshair' : (showGhost || outline.visible ? 'pointer' : 'default');
+  const placing = !!pending && state.tool === 'build';
+  if ($('placeBar').hidden === placing) { $('placeBar').hidden = !placing; document.body.classList.toggle('placing', placing); }
 }
 
 /* ───────────────────────── The part in your hand & aiming ───────────────────────── */
@@ -1757,16 +1834,66 @@ function throwNow(power) {
 }
 
 /* ───────────────────────── Input ───────────────────────── */
-function setPointer(e) {
+function setPointer(e) { aimAt(e.clientX, e.clientY); }
+function aimAt(x, y) {
   const r = canvas.getBoundingClientRect();
-  ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ndc.set(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1);
 }
 let down = null, spaceHeld = false; const activePointers = new Set();
+const tapSlop = e => e.pointerType === 'mouse' ? 6 : 10; // how far a tap may wander before it counts as a drag (fingers wobble)
 const powerEl = $('power');
 function cancelCharge() { charge = null; powerEl.classList.remove('on'); }
+// Fingers and pens get tap-to-aim building; a mouse gets hover and click-to-place.
+function noteInput(e) {
+  const touch = e.pointerType !== 'mouse';
+  if (touch === touchMode) return;
+  touchMode = touch;
+  if (!touch) pending = null;
+  updateHint(); hoverDirty = true;
+}
+
+// Touch: a finger on the waiting part slides it along the build while the camera stays put.
+let slide = null;
+const pendBox = new THREE.Box3(), slidePlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+function onPending() { // does the current ray touch the waiting part (with a little room for a fingertip)?
+  const t = state.type, [ew, ed] = dims(t, state.rot);
+  pendBox.min.set(pending.x, pending.y * PLATE, pending.z); pendBox.max.set(pending.x + ew, (pending.y + t.h) * PLATE, pending.z + ed);
+  return ray.ray.intersectsBox(pendBox.expandByScalar(0.35));
+}
+addEventListener('pointerdown', e => { // capture phase, so it decides before the orbit controls see the touch
+  if (e.target !== canvas || e.pointerType === 'mouse' || !pending || state.tool !== 'build' || slide || activePointers.size) return;
+  setPointer(e); ray.setFromCamera(ndc, camera);
+  if (!onPending()) return;
+  const [ew, ed] = dims(state.type, state.rot), r = canvas.getBoundingClientRect();
+  const v = tmpV.set(pending.x + ew / 2, pending.y * PLATE, pending.z + ed / 2).project(camera); // where it rests, on screen
+  slide = { id: e.pointerId, x0: e.clientX, y0: e.clientY, moved: false, level: pending.y,
+    dx: r.left + (v.x + 1) / 2 * r.width - e.clientX, dy: r.top + (1 - v.y) / 2 * r.height - e.clientY };
+  controls.enabled = false;
+}, true);
+// The part follows the finger at the height it started from, then climbs onto or drops off whatever is there,
+// so pulling it off a tower drops it straight down instead of jumping to the ground far behind.
+function slideTo(x, y) {
+  aimAt(x, y); ray.setFromCamera(ndc, camera);
+  slidePlane.constant = -slide.level * PLATE;
+  if (!ray.ray.intersectPlane(slidePlane, tmpV)) return;
+  const t = state.type, [ew, ed] = dims(t, state.rot);
+  const px = Math.min(Math.max(Math.round(tmpV.x - ew / 2), -HALF), HALF - ew), pz = Math.min(Math.max(Math.round(tmpV.z - ed / 2), -HALF), HALF - ed);
+  const py = settleAt(t, state.rot, px, slide.level, pz);
+  if (py !== null && (px !== pending.x || py !== pending.y || pz !== pending.z)) { pending = { x: px, y: py, z: pz }; hoverDirty = true; }
+}
+function endSlide(e) { if (slide && (!e || e.pointerId === slide.id)) { slide = null; controls.enabled = true; } }
+addEventListener('pointerup', endSlide, true);
+addEventListener('pointercancel', endSlide, true);
+
 canvas.addEventListener('pointerenter', () => { pointerInside = true; hoverDirty = true; });
 canvas.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') { pointerInside = false; hoverDirty = true; } });
 canvas.addEventListener('pointermove', e => {
+  noteInput(e);
+  if (slide && e.pointerId === slide.id) {
+    if (Math.hypot(e.clientX - slide.x0, e.clientY - slide.y0) > tapSlop(e)) slide.moved = true;
+    if (slide.moved && pending) slideTo(e.clientX + slide.dx, e.clientY + slide.dy);
+    return;
+  }
   setPointer(e); pointerInside = true; hoverDirty = true;
   if (charge) {
     if (Math.hypot(e.clientX - charge.x, e.clientY - charge.y) > 8) cancelCharge(); // it's an orbit drag
@@ -1774,6 +1901,7 @@ canvas.addEventListener('pointermove', e => {
   }
 });
 canvas.addEventListener('pointerdown', e => {
+  noteInput(e);
   activePointers.add(e.pointerId);
   if (activePointers.size > 1) { down = null; cancelCharge(); return; }
   setPointer(e); pointerInside = true;
@@ -1794,18 +1922,20 @@ canvas.addEventListener('pointerup', e => {
     if (e.pointerType !== 'mouse') pointerInside = false;
     return;
   }
-  if (moved > 6 || performance.now() - d.t > 600) return;
+  if (moved > tapSlop(e) || performance.now() - d.t > 600) return;
   setPointer(e); pointerInside = true;
   let tool = state.tool;
   if (d.button === 2 || d.shift) tool = 'erase';
   else if (d.alt) tool = 'pick';
   else if (d.button !== 0) return;
-  if (tool !== 'throw') clickWith(tool);
+  if (tool === 'build' && e.pointerType !== 'mouse') aimOrPlace();
+  else if (tool !== 'throw') clickWith(tool);
   if (e.pointerType !== 'mouse') pointerInside = false;
   hoverDirty = true;
 });
 canvas.addEventListener('pointercancel', e => { activePointers.delete(e.pointerId); down = null; cancelCharge(); });
 canvas.addEventListener('contextmenu', e => e.preventDefault());
+addEventListener('gesturestart', e => e.preventDefault()); // Safari on iPad and iPhone: a pinch moves the camera, never zooms the page
 
 function clickWith(tool) {
   clearHoverPreview();
@@ -1831,6 +1961,40 @@ function clickWith(tool) {
     toast(`Copied ${COLORS[info.color].name} ${partName(TYPE_BY_ID[info.type])}`);
   }
 }
+// Touch: the first tap shows where the part would go; tapping it again (or Place) puts it there.
+let tipShown = false;
+function aimOrPlace() {
+  const hit = raycast(true);
+  if (pending && onPending()) { placePending(); return; }
+  const pl = hit && placementFor(hit); if (!pl) return;
+  if (!pending && !tipShown) { tipShown = true; toast('Tap it again or press Place'); }
+  pending = pl; sfx('rotate'); hoverDirty = true;
+}
+function placePending() {
+  if (!pending) return;
+  const t = state.type, y = settleAt(t, state.rot, pending.x, pending.y, pending.z);
+  if (y === null) return;
+  const brick = { id: nextId++, type: t.id, color: state.color, x: pending.x, y, z: pending.z, rot: state.rot };
+  if (net.guest) net.cmd('add', { brick }); else { commit({ kind: 'add', brick }); sfx('add'); }
+  pending = { x: pending.x, y, z: pending.z }; hoverDirty = true; // the next one waits on top, ready to stack or nudge
+}
+// One stud at a time, in the grid direction closest to where the arrow points on screen.
+function nudge(dir) {
+  if (!pending) return;
+  camera.getWorldDirection(tmpV);
+  const away = Math.abs(tmpV.x) > Math.abs(tmpV.z) ? [Math.sign(tmpV.x), 0] : [0, Math.sign(tmpV.z)], right = [-away[1], away[0]];
+  const [dx, dz] = { away, near: [-away[0], -away[1]], right, left: [-right[0], -right[1]] }[dir];
+  const t = state.type, [ew, ed] = dims(t, state.rot);
+  const x = Math.min(Math.max(pending.x + dx, -HALF), HALF - ew), z = Math.min(Math.max(pending.z + dz, -HALF), HALF - ed);
+  const y = settleAt(t, state.rot, x, pending.y, z);
+  if (y === null) return;
+  pending = { x, y, z }; sfx('rotate'); hoverDirty = true;
+}
+document.querySelectorAll('#placeBar [data-nudge]').forEach(b => b.addEventListener('click', () => nudge(b.dataset.nudge)));
+$('pbTurn').onclick = () => rotate(1);
+$('pbCancel').onclick = () => { pending = null; hoverDirty = true; };
+$('pbPlace').onclick = placePending;
+
 function eraseHovered() {
   if (!pointerInside) return;
   const hit = raycast(false), id = hit && hit.object.userData.id, info = id && partInfo(id);
@@ -1843,7 +2007,7 @@ addEventListener('keydown', e => {
   if (e.key === 'Shift' || e.key === 'Alt') { mods.shift = e.shiftKey; mods.alt = e.altKey; hoverDirty = true; if (e.key === 'Alt') e.preventDefault(); return; }
   if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) { spaceHeld = true; updateSlow(); } return; }
   if (!$('help').hidden) { if (e.key === 'Escape' || e.key === 'Enter') closeHelp(); return; }
-  if (e.key === 'Escape') { togglePop(null); return; }
+  if (e.key === 'Escape') { togglePop(null); if (pending) { pending = null; hoverDirty = true; } return; }
   const ctrl = e.ctrlKey || e.metaKey, code = e.code;
   if (ctrl && code === 'KeyZ') { e.preventDefault(); e.shiftKey ? userRedo() : userUndo(); return; }
   if (ctrl && code === 'KeyY') { e.preventDefault(); userRedo(); return; }
@@ -1870,7 +2034,7 @@ addEventListener('keyup', e => {
   if (e.code === 'Space') { spaceHeld = false; updateSlow(); }
   mods.shift = e.shiftKey; mods.alt = e.altKey; hoverDirty = true;
 });
-addEventListener('blur', () => { mods.shift = mods.alt = false; spaceHeld = false; updateSlow(); cancelCharge(); hoverDirty = true; });
+addEventListener('blur', () => { mods.shift = mods.alt = false; spaceHeld = false; updateSlow(); cancelCharge(); endSlide(); hoverDirty = true; });
 // Mouse clicks on buttons shouldn't leave them focused (Space would press them again).
 document.addEventListener('pointerup', e => { const b = e.target.closest && e.target.closest('button'); if (b && e.pointerType === 'mouse') b.blur(); });
 
@@ -1892,12 +2056,21 @@ const HINTS = {
   paint: '<b>Click</b> a part to paint it',
   pick: '<b>Click</b> a part to copy its shape and color',
 };
+const TOUCH_HINTS = {
+  build: '<b>Tap</b> to choose a spot<br><b>Tap it again</b> or press <b>Place</b><br>The arrows move it one stud',
+  throw: '<b>Press and hold</b>, then let go to throw<br>Hold longer to throw harder',
+  erase: '<b>Tap</b> a part to remove it<br>Anything resting on it falls',
+  paint: '<b>Tap</b> a part to paint it',
+  pick: '<b>Tap</b> a part to copy its shape and color',
+};
 function updateHint() {
-  const tool = state.tool, tnt = isTNT(state.type.id) ? { build: '<br><b>D</b> lights every fuse', throw: '<br>Thrown TNT goes off where it lands' }[tool] : '';
-  $('hint').innerHTML = HINTS[tool] + (tnt || '') + '<span class="cam">Drag to orbit, right-drag to pan, scroll to zoom</span>';
+  const tool = state.tool, tnt = isTNT(state.type.id) ? { build: touchMode ? '<br>The plunger lights every fuse' : '<br><b>D</b> lights every fuse', throw: '<br>Thrown TNT goes off where it lands' }[tool] : '';
+  const cam = touchMode ? 'Drag to look around, pinch to zoom, two fingers to pan' : 'Drag to orbit, right-drag to pan, scroll to zoom';
+  $('hint').innerHTML = (touchMode ? TOUCH_HINTS : HINTS)[tool] + (tnt || '') + `<span class="cam">${cam}</span>`;
 }
 function setTool(tool) {
   state.tool = tool;
+  if (tool !== 'build') pending = null;
   document.querySelectorAll('.tool').forEach(b => b.classList.toggle('on', b.dataset.tool === tool));
   updateHint();
   if (tool !== 'throw') cancelCharge();
@@ -1906,7 +2079,12 @@ function setTool(tool) {
 document.querySelectorAll('.tool').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
 
 function rotate(dir = 1) {
+  const was = pending && dims(state.type, state.rot);
   state.turns += dir; state.rot = ((state.turns % 4) + 4) % 4;
+  if (was) { // a waiting part turns about its middle, not its corner (trunc, so turning back undoes it exactly)
+    const [ew, ed] = dims(state.type, state.rot);
+    pending = { x: pending.x + Math.trunc((was[0] - ew) / 2), y: pending.y, z: pending.z + Math.trunc((was[1] - ed) / 2) };
+  }
   sfx('rotate');
   updateHover(); hoverDirty = false; // turn the held part right now, not next frame
   const btn = $('rotate'); btn.classList.remove('spin'); void btn.offsetWidth; btn.classList.add('spin');
@@ -2068,8 +2246,8 @@ $('clear').onclick = () => {
   togglePop(null);
   if (!bricks.size && !debris.size) return;
   if (net.guest) net.cmd('clear'); else clearAll();
-  net.say('cleared everything. Ctrl+Z brings it back');
-  toast('Cleared. Ctrl+Z brings it back');
+  net.say('cleared everything. Undo brings it back');
+  toast(touchMode ? 'Cleared. Undo brings it back' : 'Cleared. Ctrl+Z brings it back');
 };
 $('sound').onclick = () => {
   state.sound = !state.sound;
@@ -2221,6 +2399,7 @@ function loop(now) {
     ghost.position.lerp(ghostTarget, Math.min(1, dt * 22));
     ghost.rotation.y += (-state.turns * Math.PI / 2 - ghost.rotation.y) * Math.min(1, dt * 18);
     ghostMat.opacity = REDUCED ? 0.5 : 0.42 + 0.1 * Math.sin(now / 260);
+    if (pending) outline.position.set(ghost.position.x, ghost.position.y + state.type.h * PLATE / 2, ghost.position.z);
   }
   updateFx(sdt);
   net.frame(dt, now);
