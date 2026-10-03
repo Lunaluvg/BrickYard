@@ -1,24 +1,25 @@
 // Up to five players, two ways to link up:
 //  • On your own network with play-together.bat: server.js serves the game and passes messages along.
 //  • Anywhere with internet, with the game on a website: one player taps Start and gets a 4-digit code, and
-//    friends join with the code or an invite link, from any WiFi or mobile data. Each friend's browser then
-//    talks directly to the host's (WebRTC). PeerJS, a free public service, introduces them, and relays the
-//    link when two networks won't let the browsers reach each other directly.
+//    friends join with the code or an invite link, from any WiFi or mobile data. PeerJS, a free public service,
+//    introduces each friend's browser to the host's so they can talk directly (WebRTC). When their networks
+//    won't allow that (a phone on mobile data and a computer on home WiFi often won't), that friend's messages
+//    go through the relay instead (relay.js), a little slower but from anywhere.
 // Either way one player hosts: their browser runs the physics and sends every change to the world as an "op"
 // to everyone, while the others' actions go to the host as commands. Every screen shows the same world.
 // If the host leaves, the player with the lowest number takes the game over and the others follow.
 // brickyard.html loads this only over http(s); opened as a plain file, the game is solo.
 
-import { RELAYS } from './relay.js';
+import { relayRoom, relayLink } from './relay.js';
 
 const MAX_PLAYERS = 5;
 const PROTOCOL = 2; // copies of the game on different versions can't play together; bump when the messages change
 const TINT = { 1: '#F2CD37', 2: '#36AEBF', 3: '#FE8A18', 4: '#AC78BA', 5: '#BBE90B' };
 const PEERJS = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';
-// How browsers find a way to each other: STUN servers tell each one its public address, and when two networks
-// still won't link up, a relay passes everything along (relay.js). PeerJS's own relays are gone, so they're left out.
-const PEER_OPTIONS = { config: { iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }, ...RELAYS] } };
+// STUN servers tell each browser its public address, so two browsers can find a direct way to each other.
+const PEER_OPTIONS = { config: { iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }] } };
 const ROOM_ID = code => `brickyard-game-${code}`; // what a hosted game is called on the PeerJS service
+const DIRECT_WAIT = 5000; // how long a direct link gets to open before a guest goes through the relay instead
 const CHUNK = 16000; // characters per WebRTC message; Safari takes 64 KB at most
 const nameOf = slot => `Player ${slot}`;
 const r2 = v => Math.round(v * 100) / 100, r3 = v => Math.round(v * 1e3) / 1e3, r4 = v => Math.round(v * 1e4) / 1e4;
@@ -64,7 +65,7 @@ function run(g, info) {
   const guestSends = new Map(), guestConns = new Map(), guestTabs = new Map(), slowSlots = new Set();
   let out = [], queued = false, lastHist = '', lastMe = '', meAt = 0, poseAt = 0, sent = new WeakMap();
   let lanSend = null, tries = 0;                // home WiFi
-  let pj = null, code = '', gen = 0, msgId = 0, heardAt = 0; // online
+  let pj = null, relay = null, rl = null, code = '', gen = 0, msgId = 0, heardAt = 0; // online: PeerJS, the relay room we host, our relay link as a guest
   const gliding = new Set(), vA = new THREE.Vector3(), vB = new THREE.Vector3(), qA = new THREE.Quaternion();
 
   const toHost = m => { if (hostSend) hostSend(JSON.stringify(m)); };
@@ -73,7 +74,9 @@ function run(g, info) {
     if (!guestSends.size) return;
     const text = JSON.stringify(m);
     if (lan && !except) { if (lanSend) lanSend(text); return; } // the play-together server hands it to every guest
-    for (const [slot, send] of guestSends) if (slot !== except) send(text);
+    let relayed = false;
+    for (const [slot, send] of guestSends) if (slot !== except) { if (send.relayed) relayed = true; else send(text); }
+    if (relayed && relay) sendChunks(relay.everyone, text); // once for everyone on the relay; a guest ignores news about itself
   }
   function deliver(text, from) { let m; try { m = JSON.parse(text); } catch (e) { return; } if (m && typeof m === 'object') receive(m, from); }
 
@@ -183,7 +186,7 @@ function run(g, info) {
   net.frame = (dt, now) => {
     if (roster.size < 2) return;
     if (net.guest) glide(dt);
-    else if (now - poseAt > 33) { poseAt = now; sendPoses(); }
+    else if (now - poseAt > (relay && relay.size ? 66 : 33)) { poseAt = now; sendPoses(); } // half as often when someone's on the relay
     if (now - meAt > 80) { meAt = now; sendMe(); }
     drawPeers(dt);
   };
@@ -395,7 +398,7 @@ function run(g, info) {
     };
   }
 
-  /* ───────── Online: a 4-digit game code, then a direct link from each guest to the host ───────── */
+  /* ───────── Online: a 4-digit game code, then a link from each guest to the host, direct or through the relay ───────── */
   // Big messages (a whole world) go in pieces; each link is reliable and in order, so they arrive whole.
   function sendChunks(c, s) {
     if (!c.open) return;
@@ -415,10 +418,11 @@ function run(g, info) {
     };
   }
   function teardown() {
-    const p = pj, links = [hostConn, ...guestConns.values()];
-    pj = null; hostConn = null; hostSend = null;
+    const p = pj, r = relay, links = [hostConn, rl, ...guestConns.values()];
+    pj = null; relay = null; rl = null; hostConn = null; hostSend = null;
     guestConns.clear(); guestSends.clear(); guestTabs.clear();
     for (const c of links) if (c) try { c.close(); } catch (e) { /* already gone */ }
+    if (r) r.close();
     if (p) try { p.destroy(); } catch (e) { /* already gone */ }
   }
   // Take the game's name on the PeerJS service so friends can find us. Resolves 'ok', 'taken' or 'error'.
@@ -431,7 +435,7 @@ function run(g, info) {
       let opened = false;
       const fail = r => { clearTimeout(timer); if (pj === p) pj = null; try { p.destroy(); } catch (e) { /* gone */ } resolve(r); };
       const timer = setTimeout(() => { if (!opened) fail('error'); }, 20000);
-      p.on('open', () => { if (pj !== p || opened) return; opened = true; clearTimeout(timer); resolve('ok'); });
+      p.on('open', () => { if (pj !== p || opened) return; opened = true; clearTimeout(timer); listen(c, p); resolve('ok'); });
       p.on('connection', conn => acceptGuest(p, conn));
       p.on('disconnected', () => setTimeout(() => { if (pj === p && !p.destroyed) p.reconnect(); }, 2000)); // linked players carry on meanwhile
       p.on('error', err => {
@@ -441,7 +445,18 @@ function run(g, info) {
       });
     });
   }
-  // A browser asks to come into our game: check its version, give it a player number, send it everything.
+  // Friends whose networks can't reach ours come in through the relay, so listen there for as long as we host.
+  function listen(c, p, tries = 0) {
+    const r = relay = relayRoom(c, link => acceptGuest(p, link));
+    r.on('open', () => { tries = 0; });
+    r.on('close', () => {
+      if (relay !== r) return; // we've stopped hosting
+      relay = null;
+      setTimeout(() => { if (pj === p && !relay) listen(c, p, tries + 1); }, Math.min(60000, 2000 * 2 ** tries));
+    });
+  }
+  // A browser asks to come into our game, directly or through the relay: check its version, give it a player
+  // number, send it everything.
   function acceptGuest(p, c) {
     let slot = 0;
     const refuse = (m, ms = 800) => {
@@ -460,7 +475,7 @@ function run(g, info) {
       if (!slot) { refuse({ t: 'full' }); return; }
       if (same) { const stale = guestConns.get(slot); guestConns.delete(slot); try { stale.close(); } catch (e) { /* gone */ } } // the same player on a fresh link
       guestConns.set(slot, c); guestTabs.set(slot, m.tab);
-      guestSends.set(slot, s => sendChunks(c, s));
+      guestSends.set(slot, Object.assign(s => sendChunks(c, s), { relayed: !!c.relay }));
       c.send(JSON.stringify({ t: 'hello', slot, hostSlot: me, roster: [...roster, slot] }));
       joined(slot, !!m.back || same);
     }));
@@ -474,50 +489,83 @@ function run(g, info) {
     for (let s = 1; s <= MAX_PLAYERS; s++) if (!roster.has(s)) return s;
     return 0;
   }
-  // Ask the game's host to let us in. Resolves 'ok', 'missing', 'full', 'old', 'oldhost', 'timeout' or 'error'.
+  // Ask the game's host to let us in: over a direct link when our two networks allow one, otherwise through the
+  // relay. Resolves 'ok', 'missing', 'full', 'old', 'oldhost', 'timeout' or 'nolink'.
   async function tryJoin(c, my, back) {
-    let Peer;
-    try { Peer = await loadPeerJS(); } catch (e) { return 'error'; }
+    let Peer = null;
+    try { Peer = await loadPeerJS(); } catch (e) { /* no direct link then, but the relay can still get us in */ }
     if (my !== gen) return 'stale';
     return new Promise(resolve => {
-      const p = pj = new Peer(undefined, PEER_OPTIONS);
-      let settled = false, conn = null;
-      const timer = setTimeout(() => settle(conn ? 'nolink' : 'timeout'), 15000); // found the game but no way through, or no answer at all
-      function settle(r, hello) {
+      const p = pj = Peer && new Peer(undefined, PEER_OPTIONS), r = rl = relayLink(c); // the relay takes a moment to connect, so start now
+      let settled = false, link = null, conn = null, wait = 0, again = 0;
+      const timer = setTimeout(() => settle(conn ? 'nolink' : 'timeout'), 20000); // found the game but no way through, or no answer at all
+      wait = setTimeout(viaRelay, p ? 8000 : 0); // PeerJS isn't answering
+      const join = () => JSON.stringify({ t: 'join', v: PROTOCOL, want: +keep.get('brickyard-slot') || 0, tab, back: !!back });
+      function settle(res, hello) {
         if (settled) return;
-        settled = true; clearTimeout(timer);
-        if (r === 'ok' && pj === p) {
-          hostConn = conn; hostSend = s => sendChunks(conn, s); heardAt = performance.now();
+        settled = true; clearTimeout(timer); clearTimeout(wait); clearInterval(again);
+        if (res === 'ok' && (link === r ? rl === r : pj === p)) {
+          hostConn = link; hostSend = s => sendChunks(link, s); heardAt = performance.now();
+          if (link === r) { if (pj === p) pj = null; if (p) try { p.destroy(); } catch (e) { /* gone */ } } // no direct link to keep
+          else { rl = null; r.close(); }
           if (new URLSearchParams(location.search).has('room')) history.replaceState(null, '', location.pathname);
           welcome(hello);
           resolve('ok');
           return;
         }
         if (pj === p) pj = null;
-        try { p.destroy(); } catch (e) { /* gone */ }
-        resolve(r === 'ok' ? 'stale' : r);
+        if (rl === r) rl = null;
+        if (p) try { p.destroy(); } catch (e) { /* gone */ }
+        r.close();
+        resolve(res === 'ok' ? 'stale' : res);
       }
-      p.on('open', () => {
-        if (pj !== p || settled) return;
-        conn = p.connect(ROOM_ID(c), { reliable: true, serialization: 'raw' });
-        conn.on('open', () => {
-          try { conn.send(JSON.stringify({ t: 'join', v: PROTOCOL, want: +keep.get('brickyard-slot') || 0, tab, back: !!back })); } catch (e) { /* closed again */ }
-        });
+      // Hear the host's answer on link l, direct or through the relay.
+      function use(l) {
+        link = l;
         const read = chunkReader(text => {
           let m; try { m = JSON.parse(text); } catch (e) { return; }
           if (!m) return;
-          if (settled) { if (hostConn === conn) receive(m, 0); return; }
+          if (settled) { if (hostConn === l) receive(m, 0); return; }
+          if (link !== l) return;
           if (m.t === 'hello') settle('ok', m);
           else if (m.t === 'full') settle('full');
           else if (m.t === 'old') settle(m.v > PROTOCOL ? 'old' : 'oldhost');
           else if (m.t === 'ops' || m.t === 'xf') settle('oldhost'); // an older copy of the game sends the world without a hello
         });
-        conn.on('data', d => { if (hostConn === conn) heardAt = performance.now(); read(d); }); // each piece of a big world counts
-        const gone = () => { if (!settled) settle('nolink'); else if (hostConn === conn) hostLost(); };
-        conn.on('close', gone);
-        conn.on('error', gone);
+        l.on('data', d => { if (hostConn === l) heardAt = performance.now(); read(d); }); // each piece of a big world counts
+        const gone = () => {
+          if (settled) { if (hostConn === l) hostLost(); }
+          else if (link === l) { if (l === r) settle(conn ? 'nolink' : 'timeout'); else viaRelay(); }
+        };
+        l.on('close', gone);
+        l.on('error', gone);
+      }
+      // No direct link: ask through the relay instead, and again every few seconds in case the host is between
+      // connections to it.
+      function viaRelay() {
+        if (settled || link === r) return;
+        clearTimeout(wait);
+        if (conn) try { conn.close(); } catch (e) { /* gone */ } // so the host never gets a second request from us
+        use(r);
+        if (r.done) { settle(conn ? 'nolink' : 'timeout'); return; }
+        const ask = () => r.send(join());
+        if (r.open) ask(); else r.on('open', ask);
+        again = setInterval(ask, 2500);
+      }
+      if (!p) return;
+      p.on('open', () => {
+        if (pj !== p || settled || link) return;
+        conn = p.connect(ROOM_ID(c), { reliable: true, serialization: 'raw' });
+        use(conn);
+        conn.on('open', () => { if (link === conn) try { conn.send(join()); } catch (e) { /* closed again */ } });
+        clearTimeout(wait);
+        wait = setTimeout(() => { if (!conn.open) viaRelay(); }, DIRECT_WAIT);
       });
-      p.on('error', err => { if (!settled) settle(err.type === 'peer-unavailable' ? 'missing' : conn && err.type === 'webrtc' ? 'nolink' : 'error'); });
+      p.on('error', err => { // no such game; or PeerJS can't be reached, or found no way through
+        if (settled) return;
+        if (err.type === 'peer-unavailable') settle('missing');
+        else if (!(conn && conn.open)) viaRelay(); // an open direct link no longer needs PeerJS
+      });
     });
   }
   const failText = (r, c) => ({
@@ -526,8 +574,7 @@ function run(g, info) {
     old: 'That game has a newer version of Brickyard. Refresh this page, then join again',
     oldhost: 'That game has an older version of Brickyard. Ask the others to refresh their page',
     timeout: "Couldn't connect to that game. Try again",
-    nolink: RELAYS.length ? `Found game ${c} but couldn't link up with it. Try again`
-      : `Found game ${c} but couldn't link up with it. Different networks, like mobile data and home WiFi, need a relay, and none is set up yet`,
+    nolink: `Found game ${c} but couldn't link up with it. Try again`,
   })[r] || "Couldn't reach the online service. Is the internet on?";
 
   async function startGame() {
