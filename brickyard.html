@@ -181,6 +181,24 @@ svg.i{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.9;
 .mp-who span{display:inline-flex; align-items:center; gap:6px; padding:4px 10px 4px 7px; border-radius:999px; background:var(--hover); font-weight:600; font-size:12.5px; white-space:nowrap}
 .mp-who span::before{content:""; width:11px; height:11px; border-radius:50%; background:var(--c); box-shadow:inset 0 -1.5px 0 rgba(0,0,0,.2)}
 
+/* battles: the score along the top, name tags with hearts over the figures, and a red "−1 ♥" when one is hit */
+.battle{top:calc(76px + var(--safe-t)); left:50%; transform:translateX(-50%); border-radius:var(--r-lg); padding:6px 7px 6px 16px; display:flex; align-items:center; gap:14px; z-index:5; white-space:nowrap; max-width:calc(100vw - 28px)}
+.battle[hidden], .battle [hidden]{display:none}
+.bt-title{font-weight:800; font-size:15px; letter-spacing:-.01em}
+.bt-time{font-weight:600; color:var(--ink-2); font-variant-numeric:tabular-nums}
+.bt-stat{font-weight:800; font-variant-numeric:tabular-nums}
+.bt-stat small{font-weight:600; font-size:12px; color:var(--ink-2); margin-left:4px}
+.hearts{color:#E5383B; letter-spacing:1px}
+.hearts i{font-style:normal; opacity:.25}
+.battle button{padding:7px 14px; border-radius:999px; background:var(--accent); color:var(--accent-ink); font-weight:800}
+.battle button.quiet{background:var(--hover); color:var(--ink)}
+body.battling .badge{top:calc(128px + var(--safe-t))}
+.fig-tag{position:fixed; left:0; top:0; padding:3px 9px; border-radius:999px; background:var(--c); color:#16202b; font-size:12px; font-weight:700; white-space:nowrap; pointer-events:none; z-index:3; box-shadow:0 2px 6px rgba(0,0,0,.25)}
+.fig-tag[hidden]{display:none}
+.fig-tag .hearts{color:#B5161B; margin-left:4px}
+.hurt-pop{position:fixed; font-size:24px; font-weight:800; color:#E5383B; pointer-events:none; z-index:4; text-shadow:0 2px 0 #fff, 0 3px 10px rgba(0,0,0,.35); animation:hurtUp 1s ease-out forwards}
+@keyframes hurtUp{from{opacity:1; transform:translate(-50%,-100%)} to{opacity:0; transform:translate(-50%,-260%)}}
+
 /* touch: the pad for nudging and placing a part */
 .place-bar{bottom:calc(78px + var(--safe-b)); left:50%; transform:translateX(-50%); border-radius:var(--r-lg); padding:8px; display:flex; align-items:center; gap:10px; z-index:5}
 .place-bar[hidden]{display:none}
@@ -228,6 +246,8 @@ body.placing #toast{bottom:calc(196px + var(--safe-b))}
   [data-tip]:hover::after{display:none}
   .pop{top:calc(126px + var(--safe-t)); right:calc(66px + var(--safe-r)); width:min(300px, calc(100vw - 86px))}
   .badge{top:calc(124px + var(--safe-t)); left:calc(14px + var(--safe-l)); transform:none}
+  .battle{top:calc(124px + var(--safe-t)); left:calc(10px + var(--safe-l)); right:calc(66px + var(--safe-r)); transform:none; flex-wrap:wrap; row-gap:4px; white-space:normal}
+  body.battling .badge{top:calc(176px + var(--safe-t))}
   .library{top:auto; bottom:calc(74px + var(--safe-b)); left:calc(10px + var(--safe-l)); right:calc(10px + var(--safe-r)); width:auto; height:92px; border-radius:var(--r-md)}
   .lib-scroll{display:flex; overflow-x:auto; overflow-y:hidden; padding:4px 6px; gap:10px}
   .group-name{display:none}
@@ -255,6 +275,8 @@ body.placing #toast{bottom:calc(196px + var(--safe-b))}
   .pop{top:calc(14px + var(--safe-t)); right:calc(156px + var(--safe-r)); max-height:calc(100% - 28px - var(--safe-t) - var(--safe-b))}
   #mpPop{top:calc(80px + var(--safe-t)); max-height:calc(100% - 94px - var(--safe-t) - var(--safe-b))}
   .badge{top:calc(80px + var(--safe-t)); left:calc(110px + var(--safe-l))}
+  .battle{top:calc(14px + var(--safe-t)); left:calc(110px + var(--safe-l)); right:calc(160px + var(--safe-r))}
+  body.battling .badge{top:calc(80px + var(--safe-t))}
   .library{top:calc(80px + var(--safe-t)); bottom:calc(10px + var(--safe-b)); right:auto; width:88px; height:auto}
   .lib-scroll{display:block; overflow-x:hidden; overflow-y:auto}
   .grid{display:grid; grid-template-columns:1fr}
@@ -333,6 +355,7 @@ body.placing #toast{bottom:calc(196px + var(--safe-b))}
   <p class="note" id="mpNote"></p>
   <div class="mp-addr" id="mpAddr" hidden></div>
   <div class="mp-who" id="mpWho" hidden aria-label="Players"></div>
+  <button class="wide mp-main" id="mpBattle" hidden>Start a battle</button>
   <button class="wide" id="mpCopy" hidden>Copy address</button>
   <button class="wide mp-main" id="mpStart" hidden>Start a game</button>
   <form class="mp-join" id="mpJoinForm" hidden><input id="mpCode" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder="Code" aria-label="Game code"><button class="wide" id="mpJoin">Join</button></form>
@@ -341,6 +364,12 @@ body.placing #toast{bottom:calc(196px + var(--safe-b))}
 </div>
 
 <div class="badge" id="slowBadge" hidden>Slow motion</div>
+
+<div class="panel battle" id="battle" hidden role="status" aria-live="polite">
+  <span class="bt-title" id="btTitle"></span><span class="bt-time" id="btTime"></span>
+  <span class="bt-stat hearts" id="btHearts" aria-label="Hearts"></span><span class="bt-stat" id="btThrows"></span><span class="bt-stat" id="btBricks"></span>
+  <button id="btReady" hidden>Ready</button><button id="btAgain" hidden>Play again</button><button class="quiet" id="btEnd" hidden>Back to building</button>
+</div>
 
 <aside class="panel library" aria-label="Parts">
   <div class="lib-scroll" id="lib"></div>
@@ -384,6 +413,7 @@ body.placing #toast{bottom:calc(196px + var(--safe-b))}
       <tr><td>Camera</td><td>Drag to orbit, right-drag to pan, scroll to zoom, F to reset</td></tr>
       <tr><td>Touch screens</td><td>Tap to choose a spot, then tap the part again or press Place. The arrows move it one stud, and you can drag it to slide it. Pinch to zoom</td></tr>
       <tr><td>Play together</td><td>Up to 5 players. Tap Play together at the top: one player starts a game, and friends join with its code or an invite link from anywhere with internet. Or run play-together.bat to play over your own WiFi</td></tr>
+      <tr><td>Battle</td><td>With friends in your game, the host taps Start a battle. Build a fort around your figure with 30 bricks, then knock the others out with 10 throws. Each hard hit costs a heart; the last one standing wins</td></tr>
       <tr><td>Undo, redo</td><td>Ctrl+Z, Ctrl+Y. Undo also rebuilds what you knocked down</td></tr>
     </table>
     <button class="close" id="helpClose">Start building</button>
@@ -460,9 +490,11 @@ const TYPES = [
   ['Weird','slime2x2','Slime',2,2,3,'slime'], ['Weird','slime4x4','Slime pad',4,4,1,'slime'],
   ['Weird','hole','Black hole',2,2,3,'hole'],
   ['Weird','lava2x2','Lava',2,2,3,'lava'], ['Weird','lava4x4','Lava pool',4,4,3,'lava'],
+  ['Hidden','fig','Player',2,2,10,'fig'], // a player's figure in a battle (js/battle.js puts them down; nobody builds them)
 ].map(([group,id,label,w,d,h,kind]) => ({ group, id, label, w, d, h, kind }));
 const TYPE_BY_ID = Object.fromEntries(TYPES.map(t => [t.id, t]));
-const KIND_MASS = { box: 1, tile: 1, slope: 0.7, round: 0.8, cone: 0.45, dome: 0.65, tnt: 1, water: 0.8, slime: 0.9, hole: 2.5, lava: 1.2 };
+const PICKABLE = TYPES.filter(t => t.group !== 'Hidden'); // the parts in the library
+const KIND_MASS = { box: 1, tile: 1, slope: 0.7, round: 0.8, cone: 0.45, dome: 0.65, tnt: 1, water: 0.8, slime: 0.9, hole: 2.5, lava: 1.2, fig: 1 };
 const partMass = t => t.w * t.d * t.h * 0.1 * KIND_MASS[t.kind];
 const isTNT = id => TYPE_BY_ID[id]?.kind === 'tnt';
 // Weird bricks have a look of their own (paint doesn't change them) and do something to loose pieces.
@@ -617,6 +649,7 @@ function slopeGeo(w, d, H) {
   return geo; // tall back edge sits on +Z
 }
 function buildGeo(t) {
+  if (t.kind === 'fig') return figGeo();
   const H = t.h * PLATE, parts = [];
   let studs = true, studRowOnly = null;
   if (t.kind === 'box' || t.kind === 'tile' || t.kind === 'tnt' || t.kind === 'water' || t.kind === 'lava') {
@@ -649,6 +682,21 @@ function buildGeo(t) {
     }
   }
   const merged = mergeGeometries(parts.map(prep), false);
+  merged.computeBoundingSphere(); merged.computeBoundingBox();
+  return merged;
+}
+// A player's figure in a battle, standing in its 2×2 spot and 10 plates tall, facing +Z. Three material groups:
+// the body in the player's color, a yellow head and hands, and the face (see skin()).
+function figGeo() {
+  const box = (w, h, d, x, y, z) => new RoundedBoxGeometry(w, h, d, 2, 0.05).translate(x, y + h / 2, z);
+  const cyl = (r, h, x, y, z, seg = 24) => new THREE.CylinderGeometry(r, r, h, seg).translate(x, y + h / 2, z);
+  const arm = side => new THREE.CylinderGeometry(0.16, 0.18, 1.1, 16).rotateZ(side * 0.16).translate(side * 0.86, 2.3, 0.02);
+  const torso = new THREE.CylinderGeometry(1.06, 0.88, 1.32, 4, 1).rotateY(Math.PI / 4).scale(1, 1, 0.55).translate(0, 2.3, 0); // wider at the shoulders
+  const body = [box(0.6, 1.36, 0.86, -0.32, 0, 0.02), box(0.6, 1.36, 0.86, 0.32, 0, 0.02), box(1.28, 0.28, 0.86, 0, 1.36, 0.02), torso, arm(-1), arm(1)];
+  const skinParts = [cyl(0.15, 0.24, -0.93, 1.6, 0.04), cyl(0.15, 0.24, 0.93, 1.6, 0.04), cyl(0.2, 0.1, 0, 2.96, 0), cyl(0.46, 0.74, 0, 3.06, 0, 32), cyl(0.25, 0.14, 0, 3.8, 0)];
+  const eye = x => new THREE.SphereGeometry(0.065, 12, 8).scale(1, 1, 0.45).translate(x, 3.5, 0.44);
+  const face = [eye(-0.16), eye(0.16), new THREE.TorusGeometry(0.17, 0.026, 8, 24, Math.PI).rotateZ(Math.PI).translate(0, 3.36, 0.445)];
+  const merged = mergeGeometries([body, skinParts, face].map(list => mergeGeometries(list.map(prep), false)), true);
   merged.computeBoundingSphere(); merged.computeBoundingBox();
   return merged;
 }
@@ -759,7 +807,15 @@ const haloMat = new THREE.SpriteMaterial({ transparent: true, depthWrite: false,
 const hotMat = new THREE.MeshStandardMaterial({ color: '#ff6a2a', emissive: '#ff3c00', emissiveIntensity: 1.6, roughness: 0.5 });
 for (const [m, plain] of [[waterMat, '#4CB2EC'], [slimeMat, '#7FD64A']]) Object.assign(m.userData, { clearcoat: m.clearcoat, transmission: m.transmission, color: m.color.clone(), plain: new THREE.Color(plain) });
 const WEIRD_MAT = { water: waterMat, slime: slimeMat, lava: lavaMat, hole: holeMat };
-const skin = (t, ci) => WEIRD_MAT[t.kind] || mat(ci); // a part's material: its color's, or its weird kind's own
+// A battle figure: its body in the player's color, a yellow head and hands, and a face.
+const figSkin = new THREE.MeshPhysicalMaterial({ color: '#F6D23C', roughness: 0.3, clearcoat: 0.35, clearcoatRoughness: 0.2 }), figInk = new THREE.MeshBasicMaterial({ color: 0x1b2a34 });
+figSkin.userData.clearcoat = figSkin.clearcoat;
+const figMats = new Map(); // color → the figure's three materials
+const skin = (t, ci) => { // a part's material: its color's, or its weird kind's own
+  if (t.kind !== 'fig') return WEIRD_MAT[t.kind] || mat(ci);
+  if (!figMats.has(ci)) figMats.set(ci, [mat(ci), figSkin, figInk]);
+  return figMats.get(ci);
+};
 
 /* ───────────────────────── TNT print ───────────────────────── */
 // A printed band on each side of a TNT brick. It's a child mesh, so clicks, paint and hover never touch it.
@@ -885,7 +941,11 @@ let nextId = 1;
 const state = { tool: 'build', type: TYPE_BY_ID.b2x4, color: 0, rot: 0, turns: 0, sound: true, base: 0, clutch: 1, slowmo: false, quality: 2 };
 // Playing together: js/multiplayer.js takes these over when the game is served over http(s). The host's changes to the
 // world go out as ops (net.op); a guest's actions go to the host as commands (net.cmd) instead of happening here.
-const net = { guest: false, remoteSlow: false, canUndo: false, canRedo: false, op() {}, cmd() {}, say() {}, frame() {} };
+// In a battle (js/battle.js) there are rules: allow(what, info) says whether this player may build, throw, remove, undo
+// or change the world right now (and tells them why not); launchFrom() is where their throws start; hurt(id, hearts)
+// reports a hit on a player's figure.
+const net = { guest: false, remoteSlow: false, canUndo: false, canRedo: false, op() {}, cmd() {}, say() {}, frame() {},
+  allow: () => true, launchFrom: () => null, hurt() {} };
 const chunks = new Map(); // network id → loose chunk, so both screens can name the same piece
 let lastNid = 0;
 const undoStack = [], redoStack = [];
@@ -976,7 +1036,7 @@ function wakeDebris() { for (const c of debris.values()) c.body.wakeUp(); }
 // Does this brick have a stud on top of world cell (cx, cz)?
 function hasStudAt(d, cx, cz) {
   const t = TYPE_BY_ID[d.type];
-  if (t.kind === 'tile') return false;
+  if (t.kind === 'tile' || t.kind === 'fig') return false;
   if (t.kind !== 'slope') return true;
   const [ew, ed] = dims(t, d.rot);
   const lx = cx + 0.5 - (d.x + ew / 2), lz = cz + 0.5 - (d.z + ed / 2), th = -d.rot * Math.PI / 2;
@@ -1159,6 +1219,7 @@ function breakGrid(id, D) {
   const S = CLUTCH[state.clutch].s, dmg = new Map([[id, D]]), queue = [id], seeds = [];
   while (queue.length) {
     const u = queue.shift(), du = dmg.get(u);
+    if (kindOf(bricks.get(u).data.type) === 'fig') continue; // a battle figure stays standing; it loses hearts instead
     for (const l of linksOf(u)) {
       const k = linkKey(u, l.other);
       if (!brokenLinks.has(k) && du * jitter() > l.u * S) { breakLink(k); seeds.push(u); if (l.other) seeds.push(l.other); }
@@ -1207,8 +1268,8 @@ function recolor(id, ci) {
   const p = debrisParts.get(id);
   if (p) { p.color = ci; p.mesh.material = skin(TYPE_BY_ID[p.type], ci); }
 }
-// Weird bricks keep their own look.
-const paintable = id => { const info = partInfo(id); return !!info && !isWeird(info.type); };
+// Weird bricks and battle figures keep their own look.
+const paintable = id => { const info = partInfo(id); return !!info && !isWeird(info.type) && kindOf(info.type) !== 'fig'; };
 
 /* ─────────── Impacts: read real contact impulses from the solver ─────────── */
 const impacts = [], agg = new Map(), pairCool = new Map();
@@ -1246,6 +1307,7 @@ function processImpacts(now) {
     if (last && now - last < 120) continue;
     pairCool.set(a.key, now);
     const ki = a.si.__kind, kj = a.sj.__kind;
+    if ((ki === 'fig' && a.bi.brickId) || (kj === 'fig' && a.bj.brickId)) { figHit(a); continue; } // a battle figure loses hearts instead of breaking
     if (ki === 'slime' || kj === 'slime') { wobble(a); continue; } // slime takes the hit: nothing breaks, nothing goes off
     if (ki === 'water' || kj === 'water' || ki === 'lava' || kj === 'lava') continue; // a splash or a melt instead (see touched)
     const point = { x: a.x, y: a.y, z: a.z };
@@ -1370,6 +1432,10 @@ function sfx(kind, k = 0) {
       case 'hiss': burst(t, 0.7, 5200, 0.7, 0.2, 7600); break;
       case 'gulp': tone(t, 330, 42, 0.45, 0.22); burst(t, 0.35, 900, 0.9, 0.14, 120); break;
       case 'melt': burst(t, 0.42, 3200, 0.9, 0.15, 1100); tone(t, 250, 85, 0.35, 0.06); break;
+      case 'hurt': burst(t, 0.09, 900, 1, 0.35); tone(t, 560, 170, 0.2, 0.2); break; // a battle figure loses a heart
+      case 'out': [660, 440, 300].forEach((f, i) => tone(t + i * 0.17, f, f * 0.7, 0.24, 0.16)); break;
+      case 'fight': tone(t, 440, 880, 0.22, 0.18); tone(t + 0.24, 880, 885, 0.35, 0.16); break;
+      case 'win': [523, 659, 784, 1047].forEach((f, i) => tone(t + i * 0.13, f, f * 1.01, 0.3, 0.16)); break;
       case 'boing': { // up, wobble, down
         const a = actx, o = a.createOscillator(), lfo = a.createOscillator(), depth = a.createGain(), g = a.createGain(), vol = 0.12 + 0.18 * k;
         o.frequency.setValueAtTime(130, t); o.frequency.exponentialRampToValueAtTime(400, t + 0.05); o.frequency.exponentialRampToValueAtTime(180, t + 0.34);
@@ -1415,6 +1481,7 @@ function lightFuses() {
   return ids.length;
 }
 function detonate() {
+  if (!net.allow('detonate')) return;
   const n = unlitTNT().length;
   if (!n) {
     if (fuses.size) return;
@@ -1502,6 +1569,7 @@ function blast(o, k, seeds) {
   const hurt = d => P * Math.pow(1 - Math.min(1, d / R), 1.5);
   for (const [id, b] of bricks) {
     const d = distToBrick(o, b.data); if (d >= R) continue;
+    if (kindOf(b.data.type) === 'fig') { net.hurt(id, d < R / 3 ? 2 : 1); continue; } // a battle figure loses hearts instead of coming apart
     const D = hurt(d);
     for (const l of linksOf(id)) {
       const lk = linkKey(id, l.other);
@@ -1700,7 +1768,11 @@ function fireball(p, hit) { // a thrown blob of lava melts what it hits and sets
   removeDebrisPart(p.id, false);
   effect('ember', r4(o.x), r4(o.y), r4(o.z), 1.2); sfx('melt', 1.2);
   const g = hit?.brick && bricks.get(hit.brick), q = hit?.part && debrisParts.get(hit.part);
-  if (g) { if (isTNT(g.data.type)) ignite(hit.brick, 0); else if (!isWeird(g.data.type)) burnGrid(hit.brick); }
+  if (g) {
+    if (isTNT(g.data.type)) ignite(hit.brick, 0);
+    else if (kindOf(g.data.type) === 'fig') net.hurt(hit.brick, 1);
+    else if (!isWeird(g.data.type)) burnGrid(hit.brick);
+  }
   else if (q) { if (q.kind === 'tnt') ignite(q.id, 0); else if (!WEIRD[q.kind]) melt(q); }
   for (const id of unlitTNT()) if (partCenter(id).distanceTo(o) < 1.8) ignite(id, 0.05);
 }
@@ -1732,6 +1804,28 @@ function wobble(a) {
     } else if (b.__c && a.y < b.position.y) launchOff(b, 0, 1, 0, a.dv); // a loose blob of slime bounces up off what's under it
   }
   sfx('boing', k);
+}
+// A loose piece hit a battle figure: a hard hit costs a heart. Water and slime are too soft to hurt, and a fireball
+// does its own damage (see fireball).
+function figHit(a) {
+  for (const [s, b, o, ob] of [[a.si, a.bi, a.sj, a.bj], [a.sj, a.bj, a.si, a.bi]]) {
+    if (s.__kind !== 'fig' || !b.brickId || !ob.__c) continue;
+    const soft = o.__kind === 'water' || o.__kind === 'slime' || o.__kind === 'lava';
+    if (!soft && a.dv >= 5) net.hurt(b.brickId, 1);
+  }
+  sfx('clack', a.J);
+}
+// A figure that's lost its last heart is knocked loose and sent tumbling, and whatever it held up falls.
+function knockOut(id) {
+  if (!bricks.has(id)) return;
+  const held = linksOf(id).map(l => l.other).filter(Boolean), o = partCenter(id), [c] = convertToDynamic([id]);
+  if (c) {
+    const m = c.body.mass;
+    c.body.applyImpulse(new CANNON.Vec3((Math.random() - 0.5) * 8 * m, 15 * m, (Math.random() - 0.5) * 8 * m));
+    c.body.angularVelocity.set(rnd(-9, 9), rnd(-4, 4), rnd(-9, 9));
+  }
+  collapseCheck(held);
+  effect('poof', r4(o.x), r4(o.y), r4(o.z), 1);
 }
 function launchOff(b, nx, ny, nz, dv) {
   const want = Math.min(SLIME.max, SLIME.launch + SLIME.gain * dv), v = b.velocity, along = v.x * nx + v.y * ny + v.z * nz;
@@ -1790,6 +1884,7 @@ function weirdFx(kind, a, b, c, d) {
       break;
     }
     case 'wob': { const info = partInfo(a); if (info) anims.push({ mesh: info.mesh, kind: 'jiggle', parent: info.mesh.parent, t0: performance.now(), dur: 700, k: b }); break; }
+    case 'poof': poofFx(a, b, c, d); break;
   }
 }
 // A part on its way out of the world: spiralling into a black hole, or glowing hot and sinking away.
@@ -1814,6 +1909,13 @@ function splashFx(x, y, z, k) {
     const a = Math.random() * Math.PI * 2, sp = rnd(1.5, 4) * (0.6 + 0.4 * k);
     spawn(FX.smoke, x, y + 0.05, z, Math.cos(a) * sp, rnd(0.5, 2), Math.sin(a) * sp, { drag: 3, grav: 2, size: rnd(0.18, 0.35) * (0.7 + 0.3 * k), life: rnd(0.4, 0.8), colors: STEAM });
   }
+}
+function poofFx(x, y, z, k) { // a battle figure knocked out: a puff of smoke and a burst of stars
+  const d = new THREE.Vector3();
+  for (let i = fxn(14 * k); i > 0; i--) { randomDir(d); spawn(FX.smoke, x + d.x * 0.5, y + d.y * 0.8, z + d.z * 0.5, d.x * 3, d.y * 2 + 1, d.z * 3,
+    { drag: 2.5, grav: -1, size: rnd(0.35, 0.6), life: rnd(0.7, 1.2), colors: STEAM }); }
+  for (let i = fxn(30 * k); i > 0; i--) { randomDir(d); d.y = Math.abs(d.y) + 0.2; d.normalize(); const sp = rnd(5, 12);
+    spawn(FX.spark, x, y + 1, z, d.x * sp, d.y * sp, d.z * sp, { drag: 1.5, grav: 18, size: rnd(0.06, 0.11), life: rnd(0.5, 1) }); }
 }
 function steamFx(x, y, z, k) {
   for (let i = fxn(10 + 10 * k); i > 0; i--) spawn(FX.smoke, x + rnd(-0.6, 0.6), y + rnd(0, 0.4), z + rnd(-0.6, 0.6), rnd(-0.6, 0.6), rnd(2, 4.5), rnd(-0.6, 0.6),
@@ -2010,12 +2112,12 @@ function apply(a, inverse) {
 function undo() { const a = undoStack.pop(); if (!a) return; apply(a, true); redoStack.push(a); sfx('remove'); changed(); }
 // Undo and redo from the buttons or keys. With two players there is one shared history, kept by the host.
 function userUndo() {
-  if (!(net.guest ? net.canUndo : undoStack.length)) return;
+  if (!(net.guest ? net.canUndo : undoStack.length) || !net.allow('undo')) return;
   if (net.guest) net.cmd('undo'); else undo();
   net.say('pressed undo');
 }
 function userRedo() {
-  if (!(net.guest ? net.canRedo : redoStack.length)) return;
+  if (!(net.guest ? net.canRedo : redoStack.length) || !net.allow('undo')) return;
   if (net.guest) net.cmd('redo'); else redo();
   net.say('pressed redo');
 }
@@ -2207,7 +2309,7 @@ function updateHover() {
         outline.material.color.set(tool === 'erase' ? 0xff3b30 : tool === 'paint' ? COLORS[state.color].hex : 0xF2CD37);
         outline.visible = true;
         if (tool === 'erase') setHoverPreview(info.mesh, eraseMat);
-        else if (tool === 'paint' && !isWeird(info.type)) setHoverPreview(info.mesh, mat(state.color));
+        else if (tool === 'paint' && paintable(hit.object.userData.id)) setHoverPreview(info.mesh, mat(state.color));
       }
     }
   }
@@ -2341,7 +2443,7 @@ function updateAim(now) {
   aimDots.visible = aimRing.visible = false;
   if (state.tool !== 'throw' || !(pointerInside || charge) || now < heldReadyAt || mods.shift || mods.alt) return;
   heldRig.updateMatrixWorld(true);
-  const S = heldPivot.getWorldPosition(tmpS);
+  const S = net.launchFrom() || heldPivot.getWorldPosition(tmpS);
   const r = simulateArc(S, launchVelocity(S, aimPoint(), powerNow()));
   placeDots(r.n, now); aimDots.visible = true;
   if (r.end) {
@@ -2353,9 +2455,12 @@ function updateAim(now) {
 }
 function throwParams(power) {
   heldRig.updateMatrixWorld(true);
-  const S = heldPivot.getWorldPosition(new THREE.Vector3()), Q = heldPivot.getWorldQuaternion(new THREE.Quaternion());
-  for (let i = 0; i < 8 && solidAt(S.x, S.y, S.z); i++) S.lerp(camera.position, 0.2); // never spawn inside a wall
-  S.y = Math.max(S.y, state.type.h * PLATE + 0.4);
+  const from = net.launchFrom(), Q = heldPivot.getWorldQuaternion(new THREE.Quaternion());
+  const S = from || heldPivot.getWorldPosition(new THREE.Vector3()); // in a battle, throws start above your own fort
+  if (!from) {
+    for (let i = 0; i < 8 && solidAt(S.x, S.y, S.z); i++) S.lerp(camera.position, 0.2); // never spawn inside a wall
+    S.y = Math.max(S.y, state.type.h * PLATE + 0.4);
+  }
   const v = launchVelocity(S, aimPoint(), power);
   const spin = () => (Math.random() - 0.5) * 6;
   return { type: state.type.id, color: state.color, pos: S.toArray(), quat: Q.toArray(), vel: v.toArray(), ang: [spin(), spin(), spin()], s0: heldScale };
@@ -2375,6 +2480,7 @@ function throwWith(params) {
   pushAction({ kind: 'throw', before, params });
 }
 function throwNow(power) {
+  if (!net.allow('throw')) { heldReadyAt = performance.now() + 280; return; }
   const params = throwParams(power);
   if (net.guest) net.cmd('throw', { params }); else throwWith(params);
   heldReadyAt = performance.now() + 280; heldPop = 0;
@@ -2490,6 +2596,7 @@ function clickWith(tool) {
   if (tool === 'build') {
     const pl = placementFor(hit); if (!pl) return;
     const brick = { id: nextId++, type: state.type.id, color: state.color, x: pl.x, y: pl.y, z: pl.z, rot: state.rot };
+    if (!net.allow('build', brick)) return;
     if (net.guest) return net.cmd('add', { brick }); // the host gives it an id and puts it on both screens
     placeBrick(brick);
     sfx('add');
@@ -2497,14 +2604,15 @@ function clickWith(tool) {
   }
   const id = hit.object.userData.id, info = id && partInfo(id);
   if (!info) return;
-  if (tool === 'erase') { info.where === 'grid' ? eraseGrid(id) : eraseDebris(id); }
+  if (tool === 'erase') { if (net.allow('erase', { id })) info.where === 'grid' ? eraseGrid(id) : eraseDebris(id); }
   else if (tool === 'paint') {
-    if (isWeird(info.type)) { toast(`Paint doesn’t stick to ${partName(TYPE_BY_ID[info.type])}`); return; }
+    if (!paintable(id)) { toast(`Paint doesn’t stick to ${partName(TYPE_BY_ID[info.type])}`); return; }
     if (info.color === state.color) return;
     if (net.guest) return net.cmd('paint', { id, color: state.color });
     commit({ kind: 'paint', id, from: info.color, to: state.color }); sfx('paint');
   }
   else if (tool === 'pick') {
+    if (kindOf(info.type) === 'fig') return;
     setRot(info.rot); selectColor(info.color); selectType(TYPE_BY_ID[info.type]); setTool('build');
     toast(isWeird(info.type) ? `Copied ${partName(TYPE_BY_ID[info.type])}` : `Copied ${COLORS[info.color].name} ${partName(TYPE_BY_ID[info.type])}`);
   }
@@ -2523,6 +2631,7 @@ function placePending() {
   const t = state.type, y = settleAt(t, state.rot, pending.x, pending.y, pending.z);
   if (y === null) return;
   const brick = { id: nextId++, type: t.id, color: state.color, x: pending.x, y, z: pending.z, rot: state.rot };
+  if (!net.allow('build', brick)) return;
   if (net.guest) net.cmd('add', { brick }); else { placeBrick(brick); sfx('add'); }
   pending = { x: pending.x, y, z: pending.z }; hoverDirty = true; // the next one waits on top, ready to stack or nudge
 }
@@ -2546,7 +2655,7 @@ $('pbPlace').onclick = placePending;
 function eraseHovered() {
   if (!pointerInside) return;
   const hit = raycast(false), id = hit && hit.object.userData.id, info = id && partInfo(id);
-  if (info) info.where === 'grid' ? eraseGrid(id) : eraseDebris(id);
+  if (info && net.allow('erase', { id })) info.where === 'grid' ? eraseGrid(id) : eraseDebris(id);
 }
 
 // Shortcuts use e.code (the physical key), so they work whatever language the keyboard is set to.
@@ -2572,7 +2681,7 @@ addEventListener('keydown', e => {
     case 'KeyH': openHelp(); break;
     case 'KeyD': detonate(); break;
     case 'BracketLeft': case 'BracketRight': selectColor((state.color + (code === 'BracketRight' ? 1 : -1) + COLORS.length) % COLORS.length); break;
-    case 'Comma': case 'Period': { const i = TYPES.indexOf(state.type); selectType(TYPES[(i + (code === 'Period' ? 1 : -1) + TYPES.length) % TYPES.length]); break; }
+    case 'Comma': case 'Period': { const i = PICKABLE.indexOf(state.type); selectType(PICKABLE[(i + (code === 'Period' ? 1 : -1) + PICKABLE.length) % PICKABLE.length]); break; }
     case 'KeyX': case 'Delete': case 'Backspace': eraseHovered(); break;
     default: return;
   }
@@ -2588,6 +2697,7 @@ document.addEventListener('pointerup', e => { const b = e.target.closest && e.ta
 
 /* ───────────────────────── UI ───────────────────────── */
 const partName = t => {
+  if (t.kind === 'fig') return 'a player';
   if (WEIRD[t.kind]) return { water4x4: 'pool of water', lava4x4: 'pool of lava', slime2x2: 'slime block' }[t.id] || t.label.toLowerCase();
   if (t.kind === 'tnt') return `${t.label} TNT brick`;
   if (t.group === 'Bricks') return `${t.label} brick`;
@@ -2649,7 +2759,7 @@ function setRot(r) {
 const lib = $('lib'), partButtons = new Map(), toldWeird = new Set();
 {
   let grid = null, group = null;
-  for (const t of TYPES) {
+  for (const t of PICKABLE) {
     if (t.group !== group) {
       group = t.group;
       const h = document.createElement('div'); h.className = 'group-name'; h.textContent = group; lib.appendChild(h);
@@ -2708,7 +2818,10 @@ function setClutch(i) {
   scheduleSave();
   net.op('clutch', i);
 }
-document.querySelectorAll('#clutchSeg button').forEach(b => b.addEventListener('click', () => net.guest ? net.cmd('clutch', { i: +b.dataset.v }) : setClutch(+b.dataset.v)));
+document.querySelectorAll('#clutchSeg button').forEach(b => b.addEventListener('click', () => {
+  if (!net.allow('world')) return;
+  if (net.guest) net.cmd('clutch', { i: +b.dataset.v }); else setClutch(+b.dataset.v);
+}));
 // Slow motion is shared: either player holding Space slows the one world they're both in.
 function updateSlow() {
   const mine = state.slowmo || spaceHeld;
@@ -2726,7 +2839,7 @@ function sweepLoose() {
   sfx('remove');
 }
 $('sweep').onclick = () => {
-  if (!debris.size) return;
+  if (!debris.size || !net.allow('world')) return;
   if (net.guest) net.cmd('sweep'); else sweepLoose();
   toast('Loose pieces cleared');
 };
@@ -2735,7 +2848,7 @@ BASES.forEach((b, i) => {
   const el = document.createElement('button');
   el.className = 'sw'; el.style.setProperty('--c', b.hex);
   el.title = b.name; el.setAttribute('aria-label', 'Baseplate ' + b.name);
-  el.onclick = () => { if (net.guest) return net.cmd('base', { i }); setBase(i); scheduleSave(); };
+  el.onclick = () => { if (!net.allow('world')) return; if (net.guest) return net.cmd('base', { i }); setBase(i); scheduleSave(); };
   $('baseSw').appendChild(el);
 });
 function setBase(i) {
@@ -2776,7 +2889,7 @@ $('save').onclick = () => {
   download(new Blob([JSON.stringify(serialize())], { type: 'application/json' }), `brickyard-model-${stamp()}.json`);
   toast('Model downloaded');
 };
-$('load').onclick = () => { togglePop(null); $('file').click(); };
+$('load').onclick = () => { togglePop(null); if (net.allow('world')) $('file').click(); };
 function openModel(obj) {
   const m = parseModel(obj, nextId);
   commit({ kind: 'world', before: worldSnapshot(), after: m.world });
@@ -2798,7 +2911,7 @@ function clearAll() {
 }
 $('clear').onclick = () => {
   togglePop(null);
-  if (!bricks.size && !debris.size) return;
+  if ((!bricks.size && !debris.size) || !net.allow('world')) return;
   if (net.guest) net.cmd('clear'); else clearAll();
   net.say('cleared everything. Undo brings it back');
   toast(touchMode ? 'Cleared. Undo brings it back' : 'Cleared. Ctrl+Z brings it back');
@@ -2851,7 +2964,7 @@ let thumbQueued = false;
 function scheduleThumbs() { if (thumbQueued) return; thumbQueued = true; requestAnimationFrame(renderThumbs); }
 function renderThumbs() {
   thumbQueued = false;
-  for (const t of TYPES) {
+  for (const t of PICKABLE) {
     const g = getGeo(t); thumbMesh.geometry = g; thumbMesh.material = skin(t, state.color); decorate(thumbMesh, t);
     const s = g.boundingSphere, r = t.kind === 'hole' ? 1.6 : s.radius; // a black hole's picture takes in its glowing disk
     const dist = r / Math.sin(THREE.MathUtils.degToRad(thumbCam.fov / 2)) * 0.98;
@@ -2986,7 +3099,7 @@ function loop(now) {
 }
 requestAnimationFrame(loop);
 
-window.__brickyard = { state, bricks, debris, world, camera };
+window.__brickyard = { state, bricks, debris, world, camera, controls };
 window.__brickyardReady = true;
 
 // Playing together: served over http(s) (the website, or play-together.bat), js/multiplayer.js links this
@@ -2998,7 +3111,7 @@ if (location.protocol.startsWith('http')) {
     addBrick, detachGrid, removeBrick, recolor, buildCompound, removeCompound, popMesh, grow, restoreWorld, worldSnapshot,
     commit, undo, redo, eraseGrid, eraseDebris, throwWith, lightUp, unlitTNT, sweepLoose, clearAll, openModel,
     ignite, boomFx, sfx, setBase, setClutch, setTimeScale, updateSlow, toast, changed, togglePop, scheduleSave,
-    placeBrick, paintable, weirdFx,
+    placeBrick, paintable, weirdFx, knockOut, ghostHex: (t, ci) => WEIRD[t.kind]?.ghost || COLORS[ci].hex,
     newId: () => nextId++, simTime: () => simTime, timeScale: () => timeScale, ghostAt: () => ghostAt, markHover: () => { hoverDirty = true; },
   };
   import('./js/multiplayer.js').then(m => m.start(game)).catch(() => {});

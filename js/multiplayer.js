@@ -11,9 +11,10 @@
 // brickyard.html loads this only over http(s); opened as a plain file, the game is solo.
 
 import { relayRoom, relayLink } from './relay.js';
+import { makeBattle } from './battle.js';
 
 const MAX_PLAYERS = 5;
-const PROTOCOL = 3; // copies of the game on different versions can't play together; bump when the messages change
+const PROTOCOL = 4; // copies of the game on different versions can't play together; bump when the messages change
 const TINT = { 1: '#F2CD37', 2: '#36AEBF', 3: '#FE8A18', 4: '#AC78BA', 5: '#BBE90B' };
 const PEERJS = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';
 // STUN servers tell each browser its public address, so two browsers can find a direct way to each other.
@@ -78,6 +79,9 @@ function run(g, info) {
     for (const [slot, send] of guestSends) if (slot !== except) { if (send.relayed) relayed = true; else send(text); }
     if (relayed && relay) sendChunks(relay.everyone, text); // once for everyone on the relay; a guest ignores news about itself
   }
+  // Battles (battle.js): the host keeps the score and the rules, and sends them to everyone.
+  const battle = makeBattle(g, { me: () => me, roster: () => roster, host: () => !net.guest, send: m => toGuests(m), sendTo: (s, m) => toGuest(s, m),
+    toHost: m => toHost(m), nameOf, tint: s => TINT[s], updated: () => updateUi() });
   function deliver(text, from) { let m; try { m = JSON.parse(text); } catch (e) { return; } if (m && typeof m === 'object') receive(m, from); }
 
   // `from` is the guest a message came from when we host; 0 means the host, or the play-together server.
@@ -98,6 +102,8 @@ function run(g, info) {
       case 'xf': if (net.guest) poses(m.d); break;
       case 'me': if (net.guest && isSlot(m.s) && m.s !== me) seen.set(m.s, m); break;
       case 'say': if (isSlot(m.s) && m.s !== me && typeof m.m === 'string') g.toast(`${nameOf(m.s)} ${m.m}`); break;
+      case 'bt': if (net.guest) battle.load(m.b); break; // the battle's score
+      case 'bt-no': if (net.guest && typeof m.m === 'string') g.toast(m.m); break; // the host didn't let us: why
     }
   }
 
@@ -123,6 +129,7 @@ function run(g, info) {
       if (lan) addLanGuest(slot);
       else toGuests({ t: 'peer', slot, on: true, back }, slot);
       sendWorld(slot);
+      battle.back(slot); battle.sendTo(slot);
       for (const [s, m] of seen) if (s !== slot) toGuest(slot, { ...m, s });
       lastMe = ''; // and us
     }
@@ -136,6 +143,7 @@ function run(g, info) {
       guestSends.delete(slot); guestConns.delete(slot); guestTabs.delete(slot);
       if (slowSlots.delete(slot)) { net.remoteSlow = slowSlots.size > 0; g.updateSlow(); }
       if (!lan) toGuests({ t: 'peer', slot, on: false });
+      battle.left(slot);
     }
     g.toast(`${nameOf(slot)} left`);
     updateUi();
@@ -166,6 +174,7 @@ function run(g, info) {
   }
   // The link dropped: carry on alone with the world as it is.
   function alone() {
+    battle.stop();
     hostSend = null; hostConn = null;
     guestSends.clear(); guestConns.clear(); guestTabs.clear(); slowSlots.clear();
     roster.clear(); if (me) roster.add(me);
@@ -182,8 +191,14 @@ function run(g, info) {
   };
   function flush() { queued = false; if (out.length) { toGuests({ t: 'ops', o: out }); out = []; } }
   net.cmd = (c, data) => toHost({ t: 'cmd', c, ...data });
+  // A battle's rules for our own actions: the host spends its own bricks and throws; a guest only checks, and the
+  // host decides when the command arrives.
+  net.allow = (what, info) => { const no = battle.allow(me, what, info, !net.guest); if (no) g.toast(no); return !no; };
+  net.launchFrom = () => battle.launchPoint(me);
+  net.hurt = (id, n) => { if (!net.guest) battle.hurt(id, n); };
   net.say = text => { if (roster.size > 1) net.guest ? toHost({ t: 'say', m: text }) : toGuests({ t: 'say', s: me, m: text }); };
   net.frame = (dt, now) => {
+    battle.frame(dt, now);
     if (roster.size < 2) return;
     if (net.guest) glide(dt);
     else if (now - poseAt > (relay && relay.size ? 66 : 33)) { poseAt = now; sendPoses(); } // half as often when someone's on the relay
@@ -205,8 +220,13 @@ function run(g, info) {
     if (to) toGuest(to, { t: 'ops', o }); else toGuests({ t: 'ops', o });
     sent = new WeakMap();
   }
+  // In a battle, what each command counts as under its rules (see battle.allow).
+  const RULED = { add: 'build', throw: 'throw', eraseGrid: 'erase', eraseDebris: 'erase', undo: 'undo', redo: 'undo', detonate: 'detonate',
+    sweep: 'world', clear: 'world', load: 'world', base: 'world', clutch: 'world' };
   function command(m, from) {
     const T = g.TYPE_BY_ID, okColor = c => Number.isInteger(c) && !!g.COLORS[c];
+    const no = RULED[m.c] && battle.allow(from, RULED[m.c], m.c === 'add' ? m.brick || {} : m, true);
+    if (no) { toGuest(from, { t: 'bt-no', m: no }); return; }
     switch (m.c) {
       case 'add': {
         const b = m.brick || {}, t = T[b.type], rot = b.rot & 3;
@@ -225,8 +245,9 @@ function run(g, info) {
       }
       case 'throw': {
         const p = m.params;
+        const start = battle.launchPoint(from); // in a battle, throws start above the thrower's own fort
         if (p && T[p.type] && okColor(p.color) && nums(p.pos, 3) && nums(p.quat, 4) && nums(p.vel, 3) && nums(p.ang, 3))
-          g.throwWith({ type: p.type, color: p.color, pos: p.pos, quat: p.quat, vel: p.vel, ang: p.ang, s0: Number.isFinite(p.s0) ? Math.min(1, Math.max(0.05, p.s0)) : 1 });
+          g.throwWith({ type: p.type, color: p.color, pos: start ? start.toArray() : p.pos, quat: p.quat, vel: p.vel, ang: p.ang, s0: Number.isFinite(p.s0) ? Math.min(1, Math.max(0.05, p.s0)) : 1 });
         break;
       }
       case 'detonate': if (g.unlitTNT().length) g.lightUp(); break;
@@ -239,6 +260,7 @@ function run(g, info) {
       case 'clutch': if (Number.isInteger(m.i) && g.CLUTCH[m.i]) g.setClutch(m.i); break;
       case 'slow': if (m.on) slowSlots.add(from); else slowSlots.delete(from); net.remoteSlow = slowSlots.size > 0; g.updateSlow(); break;
       case 'resync': sendWorld(from); break;
+      case 'ready': battle.ready(from); break;
     }
   }
 
@@ -366,7 +388,7 @@ function run(g, info) {
       const [, color, x, y, z, rot] = gh, [ew, ed] = g.dims(t, rot & 3), H = t.h * g.PLATE;
       vA.set(x + ew / 2, y * g.PLATE, z + ed / 2);
       ghost.geometry = g.getGeo(t);
-      ghost.material.color.set(g.COLORS[color].hex);
+      ghost.material.color.set(g.ghostHex(t, color));
       if (ghost.visible) ghost.position.lerp(vA, Math.min(1, dt * 22)); else ghost.position.copy(vA);
       ghost.rotation.y = -(rot & 3) * Math.PI / 2;
       box.position.set(ghost.position.x, ghost.position.y + H / 2, ghost.position.z);
@@ -674,7 +696,7 @@ function run(g, info) {
   /* ───────── The "Play together" chip and its panel ───────── */
   const ui = {
     btn: $('mpBtn'), text: $('mpText'), dots: $('mpBtn').querySelector('.dots'), note: $('mpNote'), addr: $('mpAddr'), who: $('mpWho'),
-    copy: $('mpCopy'), start: $('mpStart'), joinForm: $('mpJoinForm'), code: $('mpCode'), leave: $('mpLeave'), foot: $('mpFoot'),
+    copy: $('mpCopy'), start: $('mpStart'), joinForm: $('mpJoinForm'), code: $('mpCode'), leave: $('mpLeave'), foot: $('mpFoot'), battle: $('mpBattle'),
   };
   // Home WiFi: the address other devices open, on the network play-together.bat is using.
   const onThisPc = /^(localhost|127\.|\[::1\]$)/.test(location.hostname), net0 = lan && info.addresses[0];
@@ -684,6 +706,7 @@ function run(g, info) {
   ui.btn.onclick = () => g.togglePop('mp');
   ui.start.onclick = () => startGame();
   ui.leave.onclick = () => leaveGame();
+  ui.battle.onclick = () => { g.togglePop(null); battle.start(); };
   ui.joinForm.onsubmit = e => {
     e.preventDefault();
     const c = ui.code.value.replace(/\D/g, '');
@@ -712,6 +735,7 @@ function run(g, info) {
       b.style.setProperty('--c', TINT[s]); b.textContent = s === me ? `${nameOf(s)} (you)` : nameOf(s);
       return b;
     }));
+    ui.battle.hidden = !(together && !net.guest && !battle.on); // the host starts battles
     if (lan) {
       ui.note.textContent = inGame
         ? (room ? `You're ${nameOf(me)}. ${together ? 'More friends' : 'Up to 4 friends'} can join: they open this on a device${onNet}:` : `You're ${nameOf(me)}. The game is full: 5 players.`)
