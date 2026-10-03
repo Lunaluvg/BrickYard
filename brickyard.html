@@ -375,6 +375,7 @@ body.placing #toast{bottom:calc(196px + var(--safe-b))}
       <tr><td>Turn the part</td><td>R, or Q for the other way. Works with any keyboard language</td></tr>
       <tr><td>Throw</td><td>Throw tool (T): press and hold, then let go. Hold longer to throw harder</td></tr>
       <tr><td>TNT</td><td>Build it in, then press D to light the fuses. A hard hit sets it off too, so try throwing it</td></tr>
+      <tr><td>Weird parts</td><td>Loose pieces float in water, bounce off slime, melt in lava and get swallowed by a black hole. Water puts out TNT and turns lava into stone. Try throwing them too</td></tr>
       <tr><td>Remove a part</td><td>Shift+click, right-click, or Remove tool (E). Anything resting on it falls</td></tr>
       <tr><td>Copy a part</td><td>Alt+click, or Copy tool (I)</td></tr>
       <tr><td>Paint</td><td>Paint tool (P), then click a part</td></tr>
@@ -455,11 +456,30 @@ const TYPES = [
   ['Round','r1x1','1×1',1,1,3,'round'], ['Round','r2x2','2×2',2,2,3,'round'], ['Round','rp1x1','Plate 1×1',1,1,1,'round'],
   ['Round','rp2x2','Plate 2×2',2,2,1,'round'], ['Round','cone','Cone',1,1,3,'cone'], ['Round','dome','Dome 2×2',2,2,3,'dome'],
   ['TNT','tnt1x1','1×1',1,1,3,'tnt'], ['TNT','tnt2x2','2×2',2,2,3,'tnt'], ['TNT','tnt2x4','2×4',2,4,3,'tnt'],
+  ['Weird','water2x2','Water',2,2,3,'water'], ['Weird','water4x4','Pool',4,4,3,'water'],
+  ['Weird','slime2x2','Slime',2,2,3,'slime'], ['Weird','slime4x4','Slime pad',4,4,1,'slime'],
+  ['Weird','hole','Black hole',2,2,3,'hole'],
+  ['Weird','lava2x2','Lava',2,2,3,'lava'], ['Weird','lava4x4','Lava pool',4,4,3,'lava'],
 ].map(([group,id,label,w,d,h,kind]) => ({ group, id, label, w, d, h, kind }));
 const TYPE_BY_ID = Object.fromEntries(TYPES.map(t => [t.id, t]));
-const KIND_MASS = { box: 1, tile: 1, slope: 0.7, round: 0.8, cone: 0.45, dome: 0.65, tnt: 1 };
+const KIND_MASS = { box: 1, tile: 1, slope: 0.7, round: 0.8, cone: 0.45, dome: 0.65, tnt: 1, water: 0.8, slime: 0.9, hole: 2.5, lava: 1.2 };
 const partMass = t => t.w * t.d * t.h * 0.1 * KIND_MASS[t.kind];
 const isTNT = id => TYPE_BY_ID[id]?.kind === 'tnt';
+// Weird bricks have a look of their own (paint doesn't change them) and do something to loose pieces.
+// tip: said when you pick one; build and throw: the hint for each tool. ghost: the color of the part you're placing.
+const WEIRD = {
+  water: { ghost: '#3FA7E8', tip: 'Water: loose pieces float in it, and it puts out TNT',
+    build: 'Loose pieces float in water<br>It puts out lit TNT and cools lava into stone', throw: 'Thrown water splashes:<br>it puts out fuses and cools lava' },
+  slime: { ghost: '#7BD33A', tip: 'Slime: everything bounces off it, and nothing breaks',
+    build: 'Things bounce off slime and don’t break<br>TNT doesn’t go off on it', throw: 'Thrown slime is a bouncy ball' },
+  hole: { ghost: '#5B3C88', tip: 'Black hole: it swallows anything loose that comes near',
+    build: 'A black hole swallows every loose piece nearby<br>Built bricks are safe', throw: 'A thrown black hole swallows as it goes' },
+  lava: { ghost: '#FF6A1F', tip: 'Lava: it melts loose pieces and sets off TNT',
+    build: 'Lava melts loose pieces and sets off TNT<br>Water next to it turns it into stone', throw: 'Thrown lava is a fireball:<br>it melts what it hits' },
+};
+const kindOf = id => TYPE_BY_ID[id]?.kind;
+const isWeird = id => !!WEIRD[kindOf(id)];
+const STONE = { lava2x2: 'b2x2', lava4x4: 'b4x4' }; // what lava becomes when water cools it
 const jitter = () => 0.8 + Math.random() * 0.4;
 
 const COLORS = [
@@ -599,10 +619,10 @@ function slopeGeo(w, d, H) {
 function buildGeo(t) {
   const H = t.h * PLATE, parts = [];
   let studs = true, studRowOnly = null;
-  if (t.kind === 'box' || t.kind === 'tile' || t.kind === 'tnt') {
+  if (t.kind === 'box' || t.kind === 'tile' || t.kind === 'tnt' || t.kind === 'water' || t.kind === 'lava') {
     const g = new RoundedBoxGeometry(t.w - GAP, H - GAP * 0.5, t.d - GAP, 2, 0.045);
     g.translate(0, (H - GAP * 0.5) / 2, 0); parts.push(g);
-    if (t.kind === 'tile') studs = false;
+    if (t.kind !== 'box' && t.kind !== 'tnt') studs = false; // liquids and tiles are smooth on top
   } else if (t.kind === 'slope') {
     parts.push(slopeGeo(t.w, t.d, H)); studRowOnly = t.d - 1;
   } else if (t.kind === 'round') {
@@ -616,6 +636,11 @@ function buildGeo(t) {
     for (let i = 1; i <= 16; i++) { const a = (i / 16) * Math.PI / 2; pts.push(V(0.97 * Math.cos(a), 0.36 + (H - 0.36 + 0.06) * Math.sin(a))); }
     parts.push(lathe(pts, 48)); studs = false;
     const st = studGeo(); st.translate(0, H + 0.02, 0); parts.push(st);
+  } else if (t.kind === 'slime') { // a soft, blobby block; it wobbles in its material
+    const h = H - GAP * 0.5, g = new RoundedBoxGeometry(t.w - GAP, h, t.d - GAP, 4, Math.min(0.32, h / 2 - 0.02));
+    g.translate(0, h / 2, 0); parts.push(g); studs = false;
+  } else if (t.kind === 'hole') { // the dark ball; its glowing disk is added by decorate()
+    const g = new THREE.SphereGeometry(H / 2, 40, 24); g.translate(0, H / 2, 0); parts.push(g); studs = false;
   }
   if (studs) {
     for (let i = 0; i < t.w; i++) for (let j = 0; j < t.d; j++) {
@@ -651,7 +676,90 @@ function tuneMat(m) {
   const rich = QUALITY[state.quality].rich, u = m.userData;
   if (u.clearcoat !== undefined) m.clearcoat = rich ? u.clearcoat : 0;
   if (u.transmission !== undefined) { m.transmission = rich ? u.transmission : 0; m.transparent = !rich; m.opacity = rich ? 1 : 0.6; }
+  if (u.plain) m.color.copy(rich ? u.color : u.plain); // a glassy color that would look washed out as plain transparency
 }
+
+/* ───────────────────────── Weird materials ───────────────────────── */
+// One material per weird kind, shared by every brick of that kind and animated in animateWeird().
+function canvasTex(size, draw) {
+  const cv = document.createElement('canvas'); cv.width = cv.height = size;
+  draw(cv.getContext('2d'), size);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+// Ripples: a height field of waves that wrap around, turned into a normal map.
+const waterNormals = canvasTex(128, (g, N) => {
+  const waves = Array.from({ length: 7 }, (_, i) => [1 + (i * 5 + 1) % 4, (i * 3) % 5 - 2, i * 2.1, 0.7 / (i + 1)]);
+  const h = (x, y) => waves.reduce((s, [kx, ky, ph, a]) => s + a * Math.sin(2 * Math.PI * (kx * x + ky * y) / N + ph), 0);
+  const img = g.createImageData(N, N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const dx = h(x + 1, y) - h(x - 1, y), dy = h(x, y + 1) - h(x, y - 1), L = Math.hypot(dx, dy, 1), i = (y * N + x) * 4;
+    img.data[i] = (-dx / L * 0.5 + 0.5) * 255; img.data[i + 1] = (-dy / L * 0.5 + 0.5) * 255; img.data[i + 2] = (1 / L * 0.5 + 0.5) * 255; img.data[i + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+});
+const waterMat = new THREE.MeshPhysicalMaterial({ color: '#B4E6FB', roughness: 0.05, metalness: 0, transmission: 0.94, thickness: 1.2, ior: 1.33,
+  attenuationColor: new THREE.Color('#41A9EC'), attenuationDistance: 2.8, clearcoat: 1, clearcoatRoughness: 0.03,
+  normalMap: waterNormals, normalScale: new THREE.Vector2(0.4, 0.4) });
+// Slime: green jelly that sways a little; the bottom stays put so it still sits on its studs.
+const slimeClock = { value: 0 };
+const slimeMat = new THREE.MeshPhysicalMaterial({ color: '#DDFFA8', roughness: 0.12, metalness: 0, transmission: 0.8, thickness: 1, ior: 1.36,
+  attenuationColor: new THREE.Color('#86E83E'), attenuationDistance: 0.9, clearcoat: 1, clearcoatRoughness: 0.05, emissive: '#5DB51F', emissiveIntensity: 0.4 });
+slimeMat.onBeforeCompile = sh => {
+  sh.uniforms.uTime = slimeClock;
+  sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+    float sway = smoothstep(0.0, 1.2, position.y);
+    transformed.x += sin(uTime * 3.1 + position.y * 4.0 + position.z * 1.7) * 0.035 * sway;
+    transformed.z += cos(uTime * 2.6 + position.y * 3.0 + position.x * 1.9) * 0.035 * sway;
+    transformed.y *= 1.0 + sin(uTime * 2.2 + position.x * 0.8 + position.z * 0.6) * 0.025;`);
+};
+slimeMat.customProgramCacheKey = () => 'slime';
+// Lava: plates of dark crust with the melt glowing through the cracks between them (where two plates are
+// about as close as each other), wrapped around so the texture tiles.
+const lavaTex = canvasTex(128, (g, N) => {
+  const seeds = Array.from({ length: 11 }, (_, i) => [(i * 53 + 17) % N, (i * 97 + 31) % N]), img = g.createImageData(N, N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    let d1 = 1e9, d2 = 1e9;
+    for (const [sx, sy] of seeds) for (let ox = -N; ox <= N; ox += N) for (let oy = -N; oy <= N; oy += N) {
+      const d = Math.hypot(x - sx - ox, y - sy - oy);
+      if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) d2 = d;
+    }
+    const t = Math.max(0, 1 - (d2 - d1) / 8) ** 2, i = (y * N + x) * 4; // 1 in a crack, 0 in the middle of a plate
+    img.data[i] = 46 + 209 * Math.min(1, t * 1.6); img.data[i + 1] = 12 + 228 * t ** 2.2; img.data[i + 2] = 5 + 110 * t ** 4; img.data[i + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+});
+lavaTex.colorSpace = THREE.SRGBColorSpace;
+const lavaMat = new THREE.MeshStandardMaterial({ map: lavaTex, emissiveMap: lavaTex, emissive: '#ffffff', emissiveIntensity: 1.1, roughness: 0.75, metalness: 0 });
+// Black hole: a ball nothing comes back out of, a glowing disk swirling around it and a bright ring at its edge.
+const holeMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+const diskTex = canvasTex(256, (g, N) => { // the texture's edge is the disk's outer edge; the ball covers the middle third
+  const c = N / 2, grd = g.createRadialGradient(c, c, 0, c, c, c);
+  grd.addColorStop(0.32, 'rgba(255,255,255,0)'); grd.addColorStop(0.34, 'rgba(255,250,235,1)'); grd.addColorStop(0.46, 'rgba(255,205,110,0.95)');
+  grd.addColorStop(0.64, 'rgba(255,115,45,0.75)'); grd.addColorStop(0.84, 'rgba(170,55,150,0.35)'); grd.addColorStop(1, 'rgba(90,30,140,0)');
+  g.fillStyle = grd; g.fillRect(0, 0, N, N);
+  g.lineCap = 'round';
+  for (let i = 0; i < 70; i++) { // streaks, so you can see it turn
+    const r = c * (0.36 + 0.56 * ((i * 37) % 100) / 100), a0 = i * 2.4, len = 0.3 + ((i * 13) % 10) / 12;
+    g.strokeStyle = `rgba(255,${200 + (i * 7) % 55},${150 + (i * 11) % 100},${0.12 + ((i * 17) % 10) / 40})`;
+    g.lineWidth = 1 + (i % 3); g.beginPath(); g.arc(c, c, r, a0, a0 + len); g.stroke();
+  }
+});
+diskTex.center.set(0.5, 0.5);
+const diskMat = new THREE.MeshBasicMaterial({ map: diskTex, transparent: true, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
+const diskGeo = new THREE.RingGeometry(0.64, 1.9, 72, 1).rotateX(-Math.PI / 2);
+const haloMat = new THREE.SpriteMaterial({ transparent: true, depthWrite: false, toneMapped: false, map: canvasTex(128, (g, N) => {
+  const c = N / 2, grd = g.createRadialGradient(c, c, 0, c, c, c);
+  grd.addColorStop(0.44, 'rgba(255,220,170,0)'); grd.addColorStop(0.5, 'rgba(255,240,215,0.95)');
+  grd.addColorStop(0.62, 'rgba(255,150,70,0.35)'); grd.addColorStop(1, 'rgba(120,40,170,0)');
+  g.fillStyle = grd; g.fillRect(0, 0, N, N);
+}) });
+// A part melting in lava glows like this on its way down.
+const hotMat = new THREE.MeshStandardMaterial({ color: '#ff6a2a', emissive: '#ff3c00', emissiveIntensity: 1.6, roughness: 0.5 });
+for (const [m, plain] of [[waterMat, '#4CB2EC'], [slimeMat, '#7FD64A']]) Object.assign(m.userData, { clearcoat: m.clearcoat, transmission: m.transmission, color: m.color.clone(), plain: new THREE.Color(plain) });
+const WEIRD_MAT = { water: waterMat, slime: slimeMat, lava: lavaMat, hole: holeMat };
+const skin = (t, ci) => WEIRD_MAT[t.kind] || mat(ci); // a part's material: its color's, or its weird kind's own
 
 /* ───────────────────────── TNT print ───────────────────────── */
 // A printed band on each side of a TNT brick. It's a child mesh, so clicks, paint and hover never touch it.
@@ -687,12 +795,22 @@ function band(t) {
   const out = { geo: mergeGeometries(faces, true), mats: [bandMat(lx / BAND_H), bandMat(lx / BAND_H), bandMat(lz / BAND_H), bandMat(lz / BAND_H)] };
   bandGeos.set(t.id, out); return out;
 }
+// A black hole's glowing disk and bright edge are child meshes the same way.
 function decorate(mesh, t) {
-  let b = mesh.userData.band;
-  if (t.kind !== 'tnt') { if (b) b.visible = false; return mesh; }
-  if (!b) { b = mesh.userData.band = new THREE.Mesh(); b.raycast = () => {}; b.receiveShadow = true; mesh.add(b); }
-  const { geo, mats } = band(t);
-  b.geometry = geo; b.material = mats; b.visible = true;
+  const u = mesh.userData;
+  if (u.band) u.band.visible = t.kind === 'tnt';
+  if (u.halo) u.disk.visible = u.halo.visible = t.kind === 'hole';
+  if (t.kind === 'tnt') {
+    if (!u.band) { u.band = new THREE.Mesh(); u.band.raycast = () => {}; u.band.receiveShadow = true; mesh.add(u.band); }
+    const { geo, mats } = band(t);
+    u.band.geometry = geo; u.band.material = mats; u.band.visible = true;
+  } else if (t.kind === 'hole' && !u.halo) {
+    const disk = u.disk = new THREE.Mesh(diskGeo, diskMat), halo = u.halo = new THREE.Sprite(haloMat);
+    disk.position.y = halo.position.y = t.h * PLATE / 2;
+    disk.rotation.set(0.22, 0, 0.1); halo.scale.setScalar(2.4);
+    disk.raycast = halo.raycast = () => {};
+    mesh.add(disk, halo);
+  }
   return mesh;
 }
 
@@ -732,13 +850,19 @@ world.allowSleep = true;
 world.solver.iterations = 12;
 world.defaultContactMaterial.friction = 0.42;
 world.defaultContactMaterial.restitution = 0.12;
+// Every shape has a physics material, so slime can be bouncy against everything else.
+const brickPhys = new CANNON.Material('brick'), slimePhys = new CANNON.Material('slime');
+for (const other of [brickPhys, slimePhys]) world.addContactMaterial(new CANNON.ContactMaterial(slimePhys, other, { friction: 0.25, restitution: 0.9 }));
+// Collision groups: the built world, loose pieces, and loose black holes, which pass through loose pieces (they
+// swallow them instead). Water and black holes on the grid collide with nothing: things sink into one and fall into the other.
+const GROUP = { built: 1, loose: 2, hole: 4 };
 {
   const plate = new CANNON.Body({ type: CANNON.Body.STATIC });
-  plate.addShape(new CANNON.Box(new CANNON.Vec3(HALF, 0.12, HALF)));
+  plate.addShape(Object.assign(new CANNON.Box(new CANNON.Vec3(HALF, 0.12, HALF)), { material: brickPhys }));
   plate.position.set(0, -0.12, 0);
   world.addBody(plate);
   const floor = new CANNON.Body({ type: CANNON.Body.STATIC });
-  floor.addShape(new CANNON.Plane());
+  floor.addShape(Object.assign(new CANNON.Plane(), { material: brickPhys }));
   floor.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
   floor.position.set(0, -0.25, 0);
   world.addBody(floor);
@@ -754,6 +878,9 @@ const occ = new Map();         // "x,y,z" → id   (y in plate layers)
 const brokenLinks = new Set(); // "a|b" connections that have snapped (0 = baseplate)
 const debris = new Map();      // body.id → chunk { body, group, parts, links }
 const debrisParts = new Map(); // brick id → part (inside a chunk)
+// Weird bricks by kind: brick ids on the grid, and loose parts.
+const weirdGrid = { water: new Set(), slime: new Set(), hole: new Set(), lava: new Set() };
+const weirdLoose = { water: new Set(), slime: new Set(), hole: new Set(), lava: new Set() };
 let nextId = 1;
 const state = { tool: 'build', type: TYPE_BY_ID.b2x4, color: 0, rot: 0, turns: 0, sound: true, base: 0, clutch: 1, slowmo: false, quality: 2 };
 // Playing together: js/multiplayer.js takes these over when the game is served over http(s). The host's changes to the
@@ -788,26 +915,31 @@ function placeMesh(mesh, t, d) {
   mesh.position.set(d.x + ew / 2, d.y * PLATE, d.z + ed / 2);
   mesh.rotation.y = -d.rot * Math.PI / 2;
 }
-function boxShape(t, rot) {
+// A part's collision shape (a black hole is a ball), marked with its kind so contacts know what touched what.
+function partShape(t, rot) {
   const [ew, ed] = dims(t, rot), H = t.h * PLATE;
-  return new CANNON.Box(new CANNON.Vec3((ew - 0.05) / 2, (H - 0.03) / 2, (ed - 0.05) / 2));
+  const s = t.kind === 'hole' ? new CANNON.Sphere(H / 2) : new CANNON.Box(new CANNON.Vec3((ew - 0.05) / 2, (H - 0.03) / 2, (ed - 0.05) / 2));
+  s.material = t.kind === 'slime' ? slimePhys : brickPhys; s.__kind = t.kind;
+  return s;
 }
 
 /* ─────────── Grid bricks ─────────── */
 function addBrick(data, animate = true, wake = true) {
   const t = TYPE_BY_ID[data.type];
-  const mesh = decorate(new THREE.Mesh(getGeo(t), mat(data.color)), t);
+  const mesh = decorate(new THREE.Mesh(getGeo(t), skin(t, data.color)), t);
   mesh.castShadow = mesh.receiveShadow = true;
   mesh.userData.id = data.id;
   placeMesh(mesh, t, data);
   brickGroup.add(mesh);
   const [ew, ed] = dims(t, data.rot), H = t.h * PLATE;
   const body = new CANNON.Body({ type: CANNON.Body.STATIC });
-  body.addShape(boxShape(t, data.rot));
+  body.addShape(partShape(t, data.rot));
   body.position.set(data.x + ew / 2, data.y * PLATE + H / 2, data.z + ed / 2);
+  if (t.kind === 'water' || t.kind === 'hole') body.collisionFilterMask = 0;
   body.brickId = data.id;
   world.addBody(body);
   bricks.set(data.id, { data, mesh, body });
+  weirdGrid[t.kind]?.add(data.id);
   for (const k of cellsOf(data)) occ.set(k, data.id);
   nextId = Math.max(nextId, data.id + 1);
   net.op('+b', { ...data }, animate ? 1 : 0);
@@ -823,6 +955,7 @@ function detachGrid(id, pop = false) {
   clearHoverPreview();
   for (const k of cellsOf(b.data)) if (occ.get(k) === id) occ.delete(k);
   bricks.delete(id);
+  weirdGrid[kindOf(b.data.type)]?.delete(id);
   brickGroup.remove(b.mesh);
   world.removeBody(b.body); b.body.__dead = true;
   if (brokenLinks.size) for (const k of [...brokenLinks]) { const [a, c] = k.split('|'); if (+a === id || +c === id) brokenLinks.delete(k); }
@@ -881,27 +1014,36 @@ function collapseCheck(seeds) {
         if (!seen.has(l.other)) { seen.add(l.other); stack.push(l.other); }
       }
     }
-    if (!grounded) out.push(convertToDynamic(comp));
+    if (!grounded) out.push(...convertToDynamic(comp));
   }
   return out;
 }
+// Water and lava don't come loose as solid lumps: they splash away, which can leave what's left in more than one piece.
 function convertToDynamic(ids) {
+  for (const id of ids) { const k = kindOf(bricks.get(id).data.type); if (k === 'water' || k === 'lava') spill(id); }
+  ids = ids.filter(id => bricks.has(id));
   const idx = new Map(ids.map((id, i) => [id, i])), links = [];
   for (const id of ids) for (const l of linksOf(id)) {
     if (!l.other || id > l.other || !idx.has(l.other) || brokenLinks.has(linkKey(id, l.other))) continue;
     links.push({ a: idx.get(id), b: idx.get(l.other), u: l.u });
   }
-  let M = 0; const com = new THREE.Vector3();
-  const parts = ids.map(id => {
-    const b = detachGrid(id), t = TYPE_BY_ID[b.data.type], [ew, ed] = dims(t, b.data.rot), m = partMass(t);
-    const center = new THREE.Vector3(b.data.x + ew / 2, b.data.y * PLATE + t.h * PLATE / 2, b.data.z + ed / 2);
-    M += m; com.addScaledVector(center, m);
-    return { id, type: b.data.type, color: b.data.color, rot: b.data.rot, mesh: b.mesh, center };
-  });
-  com.divideScalar(M);
-  for (const p of parts) p.local = p.center.clone().sub(com);
+  const out = [];
+  for (const comp of components(ids.length, links)) {
+    const at = new Map(comp.map((i, j) => [i, j]));
+    let M = 0; const com = new THREE.Vector3();
+    const parts = comp.map(i => {
+      const id = ids[i], b = detachGrid(id), t = TYPE_BY_ID[b.data.type], [ew, ed] = dims(t, b.data.rot), m = partMass(t);
+      const center = new THREE.Vector3(b.data.x + ew / 2, b.data.y * PLATE + t.h * PLATE / 2, b.data.z + ed / 2);
+      M += m; com.addScaledVector(center, m);
+      return { id, type: b.data.type, color: b.data.color, rot: b.data.rot, mesh: b.mesh, center };
+    });
+    com.divideScalar(M);
+    for (const p of parts) p.local = p.center.clone().sub(com);
+    const own = links.filter(l => at.has(l.a) && at.has(l.b)).map(l => ({ a: at.get(l.a), b: at.get(l.b), u: l.u }));
+    out.push(buildCompound(parts, own, com, new THREE.Quaternion()));
+  }
   wakeDebris();
-  return buildCompound(parts, links, com, new THREE.Quaternion());
+  return out;
 }
 
 /* ─────────── Loose chunks ─────────── */
@@ -911,23 +1053,26 @@ function buildCompound(parts, links, pos, quat, vel, ang, sleeping, nid) {
   body.position.set(pos.x, pos.y, pos.z);
   body.quaternion.set(quat.x, quat.y, quat.z, quat.w);
   const group = new THREE.Group();
-  const c = { body, group, parts: [], links: links || [], nid: nid || ++lastNid };
+  const c = { body, group, parts: [], links: links || [], nid: nid || ++lastNid, hole: parts.some(p => kindOf(p.type) === 'hole') };
   lastNid = Math.max(lastNid, c.nid); chunks.set(c.nid, c);
+  body.collisionFilterGroup = c.hole ? GROUP.hole : GROUP.loose;
+  if (c.hole) body.collisionFilterMask = GROUP.built;
   for (const p of parts) {
-    const t = TYPE_BY_ID[p.type], H = t.h * PLATE, shape = boxShape(t, p.rot);
+    const t = TYPE_BY_ID[p.type], H = t.h * PLATE, shape = partShape(t, p.rot);
     body.addShape(shape, new CANNON.Vec3(p.local.x, p.local.y, p.local.z));
-    const mesh = p.mesh || decorate(new THREE.Mesh(getGeo(t), mat(p.color)), t);
-    mesh.material = mat(p.color);
+    const mesh = p.mesh || decorate(new THREE.Mesh(getGeo(t), skin(t, p.color)), t);
+    mesh.material = skin(t, p.color);
     mesh.position.set(p.local.x, p.local.y - H / 2, p.local.z);
     mesh.rotation.set(0, -p.rot * Math.PI / 2, 0);
     mesh.scale.setScalar(1);
     mesh.castShadow = mesh.receiveShadow = true;
     mesh.userData.id = p.id;
     group.add(mesh);
-    const part = { id: p.id, type: p.type, color: p.color, rot: p.rot, mesh, local: p.local.clone(), shape, c };
+    const part = { id: p.id, type: p.type, kind: t.kind, color: p.color, rot: p.rot, mesh, local: p.local.clone(), shape, c };
     shape.__part = part;
     c.parts.push(part);
     debrisParts.set(p.id, part);
+    weirdLoose[t.kind]?.add(part);
     nextId = Math.max(nextId, p.id + 1);
   }
   if (vel) body.velocity.set(vel.x, vel.y, vel.z);
@@ -951,7 +1096,7 @@ function removeCompound(c) {
   world.removeBody(c.body); c.body.__dead = true;
   debris.delete(c.body.id);
   debrisRoot.remove(c.group);
-  for (const p of c.parts) if (debrisParts.get(p.id) === p) debrisParts.delete(p.id);
+  for (const p of c.parts) { if (debrisParts.get(p.id) === p) debrisParts.delete(p.id); weirdLoose[p.kind]?.delete(p); }
 }
 function components(n, links, skip = -1) {
   const parent = Array.from({ length: n }, (_, i) => i);
@@ -1058,10 +1203,12 @@ function recolor(id, ci) {
   net.op('p', id, ci);
   clearHoverPreview();
   const g = bricks.get(id);
-  if (g) { g.data.color = ci; g.mesh.material = mat(ci); return; }
+  if (g) { g.data.color = ci; g.mesh.material = skin(TYPE_BY_ID[g.data.type], ci); return; }
   const p = debrisParts.get(id);
-  if (p) { p.color = ci; p.mesh.material = mat(ci); }
+  if (p) { p.color = ci; p.mesh.material = skin(TYPE_BY_ID[p.type], ci); }
 }
+// Weird bricks keep their own look.
+const paintable = id => { const info = partInfo(id); return !!info && !isWeird(info.type); };
 
 /* ─────────── Impacts: read real contact impulses from the solver ─────────── */
 const impacts = [], agg = new Map(), pairCool = new Map();
@@ -1098,6 +1245,9 @@ function processImpacts(now) {
     const last = pairCool.get(a.key);
     if (last && now - last < 120) continue;
     pairCool.set(a.key, now);
+    const ki = a.si.__kind, kj = a.sj.__kind;
+    if (ki === 'slime' || kj === 'slime') { wobble(a); continue; } // slime takes the hit: nothing breaks, nothing goes off
+    if (ki === 'water' || kj === 'water' || ki === 'lava' || kj === 'lava') continue; // a splash or a melt instead (see touched)
     const point = { x: a.x, y: a.y, z: a.z };
     if (a.dv > TNT.trigger) shockNear(point);
     let broke = false;
@@ -1110,7 +1260,7 @@ function processImpacts(now) {
         }
       } else if (me.__c && myShape.__part && myShape.__part.c === me.__c) {
         const part = myShape.__part;
-        if ((part.armed || a.dv > TNT.trigger) && isTNT(part.type)) ignite(part.id, 0);
+        if ((part.armed || a.dv > TNT.trigger) && isTNT(part.type) && !me.__c.wet) ignite(part.id, 0); // wet TNT doesn't go off
         if (fractureCompound(me.__c, part, a.J * PHYS.self)) broke = true;
       }
     }
@@ -1131,7 +1281,7 @@ function stepPhysics(dt) {
   const h = Math.min(1 / 150, Math.max(1 / 720, 0.3 / Math.max(1, Math.sqrt(v2))));
   simAcc += dt * timeScale;
   let n = 0;
-  while (simAcc >= h && n < 16) { world.step(h); processImpacts(performance.now()); simAcc -= h; n++; }
+  while (simAcc >= h && n < 16) { world.step(h); processImpacts(performance.now()); processWeird(); simAcc -= h; n++; }
   if (n === 16) simAcc = 0;
   for (const c of [...debris.values()]) {
     const p = c.body.position;
@@ -1142,7 +1292,8 @@ function stepPhysics(dt) {
 }
 
 /* ───────────────────────── Sound ───────────────────────── */
-let actx = null, noiseBuf = null, lastClack = 0;
+let actx = null, noiseBuf = null;
+const SOUND_GAP = { clack: 40, boing: 70, hiss: 120, gulp: 90, melt: 90, splash: 70 }, lastSound = {}; // ms between two of these, so a pile-up doesn't drown everything
 function audio() {
   if (!actx) {
     actx = new (window.AudioContext || window.webkitAudioContext)();
@@ -1190,7 +1341,7 @@ function boom(t, k) {
   for (let i = 0; i < 7; i++) burst(t + (0.05 + Math.random() * 0.5) / sl, 0.05, (900 + Math.random() * 3000) * sl, 1.5, g * 0.22 * Math.random());
 }
 function sfx(kind, k = 0) {
-  if (kind === 'clack') { const now = performance.now(); if (now - lastClack < 40) return; lastClack = now; }
+  if (SOUND_GAP[kind]) { const now = performance.now(); if (now - (lastSound[kind] || 0) < SOUND_GAP[kind]) return; lastSound[kind] = now; }
   if (kind !== 'rotate' && kind !== 'sizzle') net.op('s', kind, Math.round(k * 100) / 100); // the other player hears the world too
   if (!state.sound) return;
   try {
@@ -1209,6 +1360,23 @@ function sfx(kind, k = 0) {
         const g = Math.min(0.85, 0.3 + k * 0.004);
         for (let i = 0; i < 6; i++) burst(t + i * 0.022 + Math.random() * 0.02, 0.07, 1200 + Math.random() * 3000, 1.6, g * (1 - i * 0.13));
         tone(t, 220, 90, 0.18, 0.12); break;
+      }
+      case 'splash': {
+        const g = Math.min(1, 0.5 + 0.3 * k);
+        burst(t, 0.32, 650, 0.6, 0.45 * g, 220); burst(t + 0.02, 0.14, 2600, 1.1, 0.2 * g);
+        for (let i = 0; i < 4; i++) tone(t + 0.06 + i * 0.05 + Math.random() * 0.03, 700 + Math.random() * 700, 1400 + Math.random() * 900, 0.05, 0.035 * g);
+        break;
+      }
+      case 'hiss': burst(t, 0.7, 5200, 0.7, 0.2, 7600); break;
+      case 'gulp': tone(t, 330, 42, 0.45, 0.22); burst(t, 0.35, 900, 0.9, 0.14, 120); break;
+      case 'melt': burst(t, 0.42, 3200, 0.9, 0.15, 1100); tone(t, 250, 85, 0.35, 0.06); break;
+      case 'boing': { // up, wobble, down
+        const a = actx, o = a.createOscillator(), lfo = a.createOscillator(), depth = a.createGain(), g = a.createGain(), vol = 0.12 + 0.18 * k;
+        o.frequency.setValueAtTime(130, t); o.frequency.exponentialRampToValueAtTime(400, t + 0.05); o.frequency.exponentialRampToValueAtTime(180, t + 0.34);
+        lfo.frequency.value = 24; depth.gain.value = 28; lfo.connect(depth).connect(o.frequency);
+        g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.36);
+        o.connect(g).connect(a.destination); o.start(t); lfo.start(t); o.stop(t + 0.37); lfo.stop(t + 0.37);
+        break;
       }
     }
   } catch (e) {}
@@ -1369,6 +1537,318 @@ function blast(o, k, seeds) {
   }
 }
 
+/* ───────────────────────── Weird bricks ───────────────────────── */
+// Water holds loose pieces up and slows them down, a black hole pulls them in and swallows them, lava melts them and
+// slime bounces them. It all happens in the host's physics; the other players see the results, and the effects
+// arrive as "w" ops. Built bricks are never harmed, except where a thrown fireball lands.
+// A black hole pulls with acceleration pull / distance², kept between min and max, swirling sideways a little. Near it
+// pieces slow down (drag), so they spiral in, and slow ones get lighter (lift, in g), so nothing stays stuck to the floor.
+const HOLE = { reach: 11, eat: 0.95, pull: 1100, min: 30, max: 340, swirl: 0.45, lift: 0.85, drag: 1.2 };
+// Water pushes up on a piece fully under with lift (in g), and slows it (drag, plus drag2 more for every unit of speed,
+// so a fast throw stops in the water instead of going through it) and its spin.
+const WATER = { lift: 1.85, drag: 3, drag2: 0.9, spin: 2.6 };
+const STONE_COLOR = COLORS.findIndex(c => c.name === 'Black');
+const effect = (kind, ...a) => { net.op('w', kind, ...a); weirdFx(kind, ...a); }; // host: an effect everyone sees
+const dist2 = (p, h) => (p.x - h.x) ** 2 + (p.y - h.y) ** 2 + (p.z - h.z) ** 2;
+const tmpW = new THREE.Vector3(), cvF = new CANNON.Vec3(), cvR = new CANNON.Vec3();
+const spots = [], fxSpots = []; // black holes, for the physics step and for the effects
+const doomed = new Map();       // loose part id → what happens to it once this physics step is done
+let lastSplash = 0;
+
+// Every black hole: where its middle is, and the loose chunk it's part of (null when it's built in).
+function holeSpots(out) {
+  out.length = 0;
+  for (const id of weirdGrid.hole) { const d = bricks.get(id).data; out.push({ x: d.x + 1, y: (d.y + 1.5) * PLATE, z: d.z + 1, c: null }); }
+  for (const p of weirdLoose.hole) { const v = debrisCenter(p, tmpW); out.push({ x: v.x, y: v.y, z: v.z, c: p.c }); }
+  return out;
+}
+// How far under water a part is: 0 when it's out, 1 once it's r or more below the surface (which this leaves in `surface`).
+const waterCell = (x, cy, z) => weirdGrid.water.has(occ.get(key(x, cy, z)));
+let surface = 0;
+function submerged(x, y, z, r) {
+  const cx = Math.floor(x), cz = Math.floor(z), bottom = y - r;
+  let cy = Math.floor(bottom / PLATE);
+  if (!waterCell(cx, cy, cz)) return 0;
+  while (waterCell(cx, cy + 1, cz)) cy++;
+  surface = (cy + 1) * PLATE;
+  return Math.min(1, (surface - bottom) / (2 * r));
+}
+
+// Before each physics step: water holds pieces up and slows them, black holes pull them in with a swirl.
+world.addEventListener('preStep', () => {
+  holeSpots(spots);
+  const water = weirdGrid.water.size > 0;
+  if (!water && !spots.length) return;
+  for (const c of debris.values()) {
+    const b = c.body;
+    if (b.sleepState === CANNON.Body.SLEEPING) { // a black hole wakes up the pieces near it
+      if (c.hole || !spots.some(h => h.c !== c && dist2(b.position, h) < (HOLE.reach + 3) ** 2)) continue;
+      b.wakeUp();
+    }
+    let wet = 0, wetX = 0, wetY = 0, wetZ = 0;
+    for (const p of c.parts) {
+      const v = debrisCenter(p, tmpW), t = TYPE_BY_ID[p.type], m = partMass(t);
+      cvR.set(v.x - b.position.x, v.y - b.position.y, v.z - b.position.z);
+      if (water && !c.hole) {
+        const s = submerged(v.x, v.y, v.z, Math.max(0.2, t.h * PLATE / 2));
+        if (s > 0) {
+          if (s > wet) { wet = s; wetX = v.x; wetY = surface; wetZ = v.z; }
+          const vel = b.velocity, k = (WATER.drag + WATER.drag2 * vel.length()) * s * m;
+          b.applyForce(cvF.set(-vel.x * k, GRAVITY * WATER.lift * s * m - vel.y * k, -vel.z * k), cvR);
+          if (p.kind === 'water' || p.kind === 'lava' || (p.kind === 'tnt' && (p.armed || fuses.has(p.id)))) doomed.set(p.id, ['wet']);
+        }
+      }
+      if (!c.hole) {
+        let near = false;
+        for (const h of spots) {
+          if (h.c === c) continue;
+          const dx = h.x - v.x, dy = h.y - v.y, dz = h.z - v.z, d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 > HOLE.reach * HOLE.reach) continue;
+          const d = Math.sqrt(d2) || 1e-3, a = Math.min(HOLE.max, Math.max(HOLE.min, HOLE.pull / d2)) * m / d;
+          b.applyForce(cvF.set((dx - dz * HOLE.swirl) * a, dy * a, (dz + dx * HOLE.swirl) * a), cvR);
+          near = true;
+        }
+        if (near) {
+          const vel = b.velocity, k = HOLE.drag * m, lift = vel.lengthSquared() < 16 ? GRAVITY * HOLE.lift * m : 0;
+          b.applyForce(cvF.set(-vel.x * k, lift - vel.y * k, -vel.z * k), cvR);
+        }
+      }
+    }
+    if (wet) {
+      const w = b.angularVelocity, k = Math.exp(-WATER.spin * wet * world.dt);
+      w.set(w.x * k, w.y * k, w.z * k);
+      if (!c.wet && b.velocity.y < -5) splashIn(wetX, wetY, wetZ, -b.velocity.y);
+    }
+    c.wet = wet;
+  }
+});
+// After each physics step: what touched lava or a thrown blob of water or lava, and what fell into a black hole.
+world.addEventListener('postStep', () => {
+  if (weirdGrid.lava.size || weirdLoose.lava.size || weirdLoose.water.size)
+    for (const eq of world.contacts) { touched(eq.si, eq.sj, eq.bj); touched(eq.sj, eq.si, eq.bi); }
+  if (spots.length) for (const c of debris.values()) {
+    if (c.hole || c.body.sleepState === CANNON.Body.SLEEPING) continue;
+    for (const p of c.parts) {
+      const v = debrisCenter(p, tmpW);
+      for (const h of spots) if (h.c !== c && dist2(v, h) < HOLE.eat * HOLE.eat) { doomed.set(p.id, ['eat', h]); break; }
+    }
+  }
+});
+// Shape s touched shape o on body ob.
+function touched(s, o, ob) {
+  const p = s.__part, q = o.__part;
+  if (p?.kind === 'water') doomed.set(p.id, ['burst']);
+  else if (p?.kind === 'lava') doomed.set(p.id, ['fire', ob.brickId ? { brick: ob.brickId } : q ? { part: q.id } : null]);
+  else if (s.__kind === 'lava' && q && q.kind !== 'lava' && q.kind !== 'hole') // built lava and a loose piece
+    doomed.set(q.id, q.kind === 'tnt' ? ['light'] : q.kind === 'water' ? ['burst'] : ['melt']);
+}
+function processWeird() {
+  if (!doomed.size) return;
+  const list = [...doomed]; doomed.clear();
+  for (const [id, [what, arg]] of list) {
+    const p = debrisParts.get(id); if (!p) continue;
+    if (what === 'eat') swallow(p, arg);
+    else if (what === 'melt') melt(p);
+    else if (what === 'light') { if (!fuses.has(id)) ignite(id, 0); }
+    else if (what === 'burst') splash(p);
+    else if (what === 'fire') fireball(p, arg);
+    else if (what === 'wet') { // something fell into water
+      if (p.kind === 'water') splash(p);
+      else if (p.kind === 'lava') fizzle(p);
+      else { p.armed = false; if (fuses.has(id)) putOut(id); }
+    }
+  }
+}
+function splashIn(x, y, z, speed) {
+  const now = performance.now(); if (now - lastSplash < 70) return; lastSplash = now;
+  const k = Math.min(2, speed / 14);
+  effect('splash', r4(x), r4(y), r4(z), r4(k)); sfx('splash', k);
+}
+function swallow(p, h) { // into a black hole
+  effect('eat', p.id, r4(h.x), r4(h.y), r4(h.z));
+  removeDebrisPart(p.id, false);
+  sfx('gulp');
+}
+function melt(p) { // into lava
+  effect('melt', p.id);
+  removeDebrisPart(p.id, false);
+  sfx('melt');
+}
+function splash(p) { // a thrown blob of water splashes: fuses, fireballs and lava nearby go out
+  const o = debrisCenter(p, new THREE.Vector3());
+  removeDebrisPart(p.id, false);
+  effect('splash', r4(o.x), r4(o.y), r4(o.z), 1.2); sfx('splash', 1.2);
+  for (const id of [...fuses.keys()]) if (partInfo(id) && partCenter(id).distanceTo(o) < 3.2) putOut(id);
+  for (const q of [...weirdLoose.lava]) if (debrisCenter(q, tmpW).distanceTo(o) < 3.2) fizzle(q);
+  for (const id of [...weirdGrid.lava]) if (distToBrick(o, bricks.get(id).data) < 3.2) cool(id);
+}
+function fizzle(p) { // a fireball goes out
+  const o = debrisCenter(p, new THREE.Vector3());
+  removeDebrisPart(p.id, false);
+  effect('steam', r4(o.x), r4(o.y), r4(o.z), 1); sfx('hiss');
+}
+function putOut(id) { fuses.delete(id); effect('fizz', id); sfx('hiss'); }
+function cool(id) { // lava that meets water turns to stone
+  const b = bricks.get(id); if (!b) return;
+  const d = { ...b.data }, o = partCenter(id);
+  detachGrid(id);
+  addBrick({ ...d, type: STONE[d.type], color: STONE_COLOR }, false);
+  effect('steam', r4(o.x), r4(o.y), r4(o.z), 1.4); sfx('hiss');
+}
+function fireball(p, hit) { // a thrown blob of lava melts what it hits and sets off TNT close by
+  const o = debrisCenter(p, new THREE.Vector3());
+  removeDebrisPart(p.id, false);
+  effect('ember', r4(o.x), r4(o.y), r4(o.z), 1.2); sfx('melt', 1.2);
+  const g = hit?.brick && bricks.get(hit.brick), q = hit?.part && debrisParts.get(hit.part);
+  if (g) { if (isTNT(g.data.type)) ignite(hit.brick, 0); else if (!isWeird(g.data.type)) burnGrid(hit.brick); }
+  else if (q) { if (q.kind === 'tnt') ignite(q.id, 0); else if (!WEIRD[q.kind]) melt(q); }
+  for (const id of unlitTNT()) if (partCenter(id).distanceTo(o) < 1.8) ignite(id, 0.05);
+}
+function burnGrid(id) { // a built brick melts away, and whatever it held up falls
+  const held = linksOf(id).map(l => l.other).filter(Boolean);
+  effect('melt', id);
+  detachGrid(id);
+  collapseCheck(held);
+}
+function spill(id) { // water or lava knocked loose splashes away
+  const water = kindOf(bricks.get(id).data.type) === 'water', o = partCenter(id);
+  effect(water ? 'splash' : 'ember', r4(o.x), r4(o.y), r4(o.z), 1);
+  detachGrid(id);
+  sfx(water ? 'splash' : 'melt', 1);
+}
+// Slime that's hit jiggles, goes boing and throws the piece back, at least SLIME.launch fast (more for a harder hit).
+// TNT that lands on slime is safe until you light it.
+const SLIME = { launch: 7, gain: 0.7, max: 20 };
+function wobble(a) {
+  const k = Math.min(1, a.dv / 18);
+  for (const [s, b, o, ob] of [[a.si, a.bi, a.sj, a.bj], [a.sj, a.bj, a.si, a.bi]]) {
+    if (s.__kind !== 'slime') continue;
+    effect('wob', b.brickId || s.__part.id, Math.round(k * 100) / 100);
+    if (o.__part?.kind === 'tnt') o.__part.armed = false;
+    if (b.brickId && ob.__c) { // built slime: straight out of the face that was hit
+      const he = s.halfExtents, d = [(a.x - b.position.x) / he.x, (a.y - b.position.y) / he.y, (a.z - b.position.z) / he.z];
+      const i = [0, 2].reduce((m, j) => (Math.abs(d[j]) > Math.abs(d[m]) ? j : m), 1); // the axis it's furthest out along; ties go to the top
+      launchOff(ob, i === 0 ? Math.sign(d[0]) : 0, i === 1 ? Math.sign(d[1]) : 0, i === 2 ? Math.sign(d[2]) : 0, a.dv);
+    } else if (b.__c && a.y < b.position.y) launchOff(b, 0, 1, 0, a.dv); // a loose blob of slime bounces up off what's under it
+  }
+  sfx('boing', k);
+}
+function launchOff(b, nx, ny, nz, dv) {
+  const want = Math.min(SLIME.max, SLIME.launch + SLIME.gain * dv), v = b.velocity, along = v.x * nx + v.y * ny + v.z * nz;
+  if (along < want) { const add = want - along; v.set(v.x + nx * add, v.y + ny * add, v.z + nz * add); b.wakeUp(); }
+}
+
+// Some parts react to what they're built next to: water cools lava into stone, and lava sets off TNT.
+function touching(d) { // the bricks touching this one's sides, top or bottom
+  const t = TYPE_BY_ID[d.type], [ew, ed] = dims(t, d.rot), out = new Set();
+  const look = (x, y, z) => { const o = occ.get(key(x, y, z)); if (o !== undefined && o !== d.id) out.add(o); };
+  for (let i = 0; i < ew; i++) for (let k = 0; k < ed; k++) { look(d.x + i, d.y - 1, d.z + k); look(d.x + i, d.y + t.h, d.z + k); }
+  for (let j = 0; j < t.h; j++) {
+    for (let i = 0; i < ew; i++) { look(d.x + i, d.y + j, d.z - 1); look(d.x + i, d.y + j, d.z + ed); }
+    for (let k = 0; k < ed; k++) { look(d.x - 1, d.y + j, d.z + k); look(d.x + ew, d.y + j, d.z + k); }
+  }
+  return [...out];
+}
+function reactions(d) {
+  const k = kindOf(d.type), out = [];
+  if (k !== 'water' && k !== 'lava' && k !== 'tnt') return out;
+  const near = touching(d).map(id => [id, kindOf(bricks.get(id).data.type)]);
+  if (k === 'water') for (const [id, nk] of near) if (nk === 'lava') out.push(['cool', id]);
+  if (k === 'lava') {
+    if (near.some(([, nk]) => nk === 'water')) out.push(['cool', d.id]);
+    else for (const [id, nk] of near) if (nk === 'tnt') out.push(['light', id]);
+  }
+  if (k === 'tnt' && near.some(([, nk]) => nk === 'lava')) out.push(['light', d.id]);
+  return out;
+}
+function react(id) {
+  const d = bricks.get(id)?.data; if (!d) return;
+  for (const [what, target] of reactions(d)) if (bricks.has(target)) what === 'cool' ? cool(target) : ignite(target, 0.5 + Math.random() * 0.3, true);
+}
+// Put a part on the grid as one step of history. A weird part can change what's around it (a black hole swallows
+// loose pieces, water cools lava into stone), so then the step keeps the world from before, and undo brings it all back.
+function placeBrick(brick) {
+  const k = kindOf(brick.type), keep = ((k === 'hole' || k === 'lava') && debris.size > 0) || reactions(brick).length > 0;
+  commit(keep ? { kind: 'add', brick, before: worldSnapshot() } : { kind: 'add', brick });
+}
+
+// What everyone sees (the host sends these as "w" ops): a part swallowed or melting, a splash, steam, embers,
+// a fuse put out, slime wobbling.
+function weirdFx(kind, a, b, c, d) {
+  switch (kind) {
+    case 'eat': { const p = debrisParts.get(a); if (p) leave(p.mesh, 'eat', new THREE.Vector3(b, c, d)); break; }
+    case 'melt': { const info = partInfo(a); if (info) leave(info.mesh, 'melt'); break; }
+    case 'splash': splashFx(a, b, c, d); break;
+    case 'steam': steamFx(a, b, c, d); break;
+    case 'ember': emberFx(a, b, c, d); break;
+    case 'fizz': {
+      fuses.delete(a);
+      const info = partInfo(a); if (!info) break;
+      const m = info.mesh; if (m.userData.glow) { m.remove(m.userData.glow); m.userData.glow = null; }
+      m.scale.setScalar(1);
+      const o = partCenter(a); steamFx(o.x, o.y, o.z, 0.6);
+      break;
+    }
+    case 'wob': { const info = partInfo(a); if (info) anims.push({ mesh: info.mesh, kind: 'jiggle', parent: info.mesh.parent, t0: performance.now(), dur: 700, k: b }); break; }
+  }
+}
+// A part on its way out of the world: spiralling into a black hole, or glowing hot and sinking away.
+function leave(mesh, how, to) {
+  clearHoverPreview();
+  fxGroup.attach(mesh);
+  anims.push({ mesh, kind: how, t0: performance.now(), dur: how === 'eat' ? 450 : 750, from: mesh.position.clone(), to, s0: mesh.scale.x, spin: (Math.random() - 0.5) * 14 });
+  if (how === 'melt') {
+    mesh.material = hotMat;
+    const o = mesh.position;
+    for (let i = fxn(6); i > 0; i--) spawn(FX.smoke, o.x + rnd(-0.3, 0.3), o.y + 0.3, o.z + rnd(-0.3, 0.3), rnd(-0.4, 0.4), rnd(1.5, 3), rnd(-0.4, 0.4),
+      { drag: 1.8, grav: -1.8, size: rnd(0.25, 0.45), life: rnd(0.9, 1.5), colors: SOOT, age: -Math.random() * 0.2 });
+  }
+}
+function splashFx(x, y, z, k) {
+  const d = new THREE.Vector3();
+  for (let i = fxn(18 + 22 * k); i > 0; i--) { // drops thrown up and out
+    randomDir(d); d.y = Math.abs(d.y) * 1.4 + 0.6; d.normalize(); const sp = rnd(4, 11) * (0.6 + 0.4 * k);
+    spawn(FX.spark, x + d.x * 0.3, y, z + d.z * 0.3, d.x * sp, d.y * sp, d.z * sp, { drag: 1.2, grav: 30, size: rnd(0.06, 0.12), life: rnd(0.4, 0.8), colors: DROPS });
+  }
+  for (let i = fxn(8 + 8 * k); i > 0; i--) { // foam
+    const a = Math.random() * Math.PI * 2, sp = rnd(1.5, 4) * (0.6 + 0.4 * k);
+    spawn(FX.smoke, x, y + 0.05, z, Math.cos(a) * sp, rnd(0.5, 2), Math.sin(a) * sp, { drag: 3, grav: 2, size: rnd(0.18, 0.35) * (0.7 + 0.3 * k), life: rnd(0.4, 0.8), colors: STEAM });
+  }
+}
+function steamFx(x, y, z, k) {
+  for (let i = fxn(10 + 10 * k); i > 0; i--) spawn(FX.smoke, x + rnd(-0.6, 0.6), y + rnd(0, 0.4), z + rnd(-0.6, 0.6), rnd(-0.6, 0.6), rnd(2, 4.5), rnd(-0.6, 0.6),
+    { drag: 1.6, grav: -1.5, size: rnd(0.3, 0.6) * (0.6 + 0.4 * k), life: rnd(1, 1.8), colors: STEAM, age: -Math.random() * 0.15 });
+}
+function emberFx(x, y, z, k) {
+  const d = new THREE.Vector3();
+  for (let i = fxn(16 + 20 * k); i > 0; i--) {
+    randomDir(d); d.y = Math.abs(d.y) + 0.3; d.normalize(); const sp = rnd(3, 9) * (0.6 + 0.4 * k);
+    spawn(FX.spark, x, y, z, d.x * sp, d.y * sp, d.z * sp, { drag: 1.5, grav: 22, size: rnd(0.05, 0.1), life: rnd(0.5, 1.1) });
+  }
+  for (let i = fxn(4 + 4 * k); i > 0; i--) spawn(FX.fire, x + rnd(-0.3, 0.3), y + rnd(0, 0.3), z + rnd(-0.3, 0.3), rnd(-1, 1), rnd(1, 3), rnd(-1, 1),
+    { drag: 3, grav: -2, size: rnd(0.3, 0.6) * (0.6 + 0.4 * k), life: rnd(0.3, 0.5) });
+  for (let i = fxn(5 + 5 * k); i > 0; i--) spawn(FX.smoke, x + rnd(-0.3, 0.3), y + 0.2, z + rnd(-0.3, 0.3), rnd(-0.5, 0.5), rnd(1.5, 3), rnd(-0.5, 0.5),
+    { drag: 1.8, grav: -1.8, size: rnd(0.25, 0.5), life: rnd(0.9, 1.5), colors: SOOT });
+}
+// Every frame: ripples drift, slime sways, lava churns and throws up embers, black hole disks turn.
+function animateWeird(now, sdt) {
+  const t = now / 1000, go = REDUCED ? 0.2 : 1;
+  waterNormals.offset.set(t * 0.03 * go, t * 0.017 * go);
+  if (!REDUCED) slimeClock.value = t;
+  lavaTex.offset.set(t * 0.012 * go, t * 0.007 * go);
+  lavaMat.emissiveIntensity = 1.05 + 0.25 * Math.sin(t * 1.9) * go;
+  diskTex.rotation = -t * 1.3 * go;
+  haloMat.opacity = 0.85 + 0.15 * Math.sin(t * 3.1) * go;
+  if (weirdGrid.hole.size || weirdLoose.hole.size) holeSpots(fxSpots); else fxSpots.length = 0;
+  let n = 0;
+  for (const id of weirdGrid.lava) {
+    if (n > 12 || Math.random() > sdt * 1.6 * QUALITY[state.quality].fx) continue;
+    const dd = bricks.get(id).data, tt = TYPE_BY_ID[dd.type], [ew, ed] = dims(tt, dd.rot); n++;
+    spawn(FX.spark, dd.x + Math.random() * ew, (dd.y + tt.h) * PLATE, dd.z + Math.random() * ed, rnd(-0.6, 0.6), rnd(1.5, 3.5), rnd(-0.6, 0.6),
+      { drag: 1, grav: 3, size: rnd(0.04, 0.07), life: rnd(0.6, 1.2) });
+  }
+}
+
 /* explosion effects: instanced, so even a long chain of blasts is three draw calls */
 const rnd = (a, b) => a + Math.random() * (b - a);
 const fxn = n => Math.round(n * QUALITY[state.quality].fx); // fewer particles on lower graphics levels
@@ -1391,6 +1871,7 @@ const FX = {
     ramp('#4E4842', '#8C867E', '#C8C3BB', '#E6E2DC'), t => easeOutCubic(Math.min(1, t / 0.3)) * (1 - THREE.MathUtils.smoothstep(t, 0.5, 1))),
 };
 const DUST = ramp('#A2998C', '#C9C2B6', '#E4DFD6');
+const DROPS = ramp('#FFFFFF', '#D6F1FF', '#8ED0F6', '#4AA6E4'), STEAM = ramp('#FFFFFF', '#F4F6F7', '#E2E7EA', '#D3D9DD'), SOOT = ramp('#3A3330', '#5A514C', '#8C847E', '#B9B2AC');
 const flash = new THREE.PointLight(0xffa64d, 0, 30, 2); // always in the scene, so the first blast doesn't stall on a shader rebuild
 scene.add(flash);
 let flashLevel = 0, shakeAmt = 0;
@@ -1441,6 +1922,13 @@ function updateFx(sdt) {
       if (p.age > 0) {
         const dr = Math.exp(-p.drag * sdt);
         p.vx *= dr; p.vy = p.vy * dr - p.grav * sdt; p.vz *= dr;
+        for (const h of fxSpots) { // black holes suck in smoke and sparks too
+          const dx = h.x - p.x, dy = h.y - p.y, dz = h.z - p.z, d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 > 144) continue;
+          if (d2 < 0.5) { p.age = p.life; break; }
+          const a = Math.min(500, 900 / d2) * sdt / Math.sqrt(d2);
+          p.vx += dx * a; p.vy += dy * a; p.vz += dz * a;
+        }
         p.x += p.vx * sdt; p.y += p.vy * sdt; p.z += p.vz * sdt;
         const floor = Math.abs(p.x) <= HALF && Math.abs(p.z) <= HALF ? 0.03 : -0.22;
         if (p.y < floor) { p.y = floor; if (p.vy < 0) p.vy *= -0.3; p.vx *= 0.7; p.vz *= 0.7; }
@@ -1507,7 +1995,10 @@ function pushAction(a) { undoStack.push(a); if (undoStack.length > 300) undoStac
 function commit(a) { apply(a, false); pushAction(a); }
 function apply(a, inverse) {
   switch (a.kind) {
-    case 'add': inverse ? removeBrick(a.brick.id) : addBrick({ ...a.brick }); break;
+    case 'add':
+      if (inverse) { if (a.before) restoreWorld(a.before); else removeBrick(a.brick.id); }
+      else { addBrick({ ...a.brick }); react(a.brick.id); }
+      break;
     case 'remove': if (inverse) { a.before ? restoreWorld(a.before) : addBrick({ ...a.brick }); } else eraseGridNow(a.brick.id); break;
     case 'paint': recolor(a.id, inverse ? a.from : a.to); break;
     case 'world': restoreWorld(inverse ? a.before : a.after); break;
@@ -1632,15 +2123,15 @@ outline.visible = false; outline.renderOrder = 20; scene.add(outline);
 const eraseMat = new THREE.MeshPhysicalMaterial({ color: '#ff5140', transparent: true, opacity: 0.55, roughness: 0.3, depthWrite: false });
 const tmpBox = new THREE.Box3(), tmpV = new THREE.Vector3();
 
-function setHoverPreview(mesh, color, material) { hoverPrev = { mesh, color }; mesh.material = material; }
-function clearHoverPreview() { if (!hoverPrev) return; hoverPrev.mesh.material = mat(hoverPrev.color); hoverPrev = null; }
+function setHoverPreview(mesh, material) { hoverPrev = { mesh, material: mesh.material }; mesh.material = material; }
+function clearHoverPreview() { if (!hoverPrev) return; hoverPrev.mesh.material = hoverPrev.material; hoverPrev = null; }
 
 function syncGhostLook() {
   ghost.geometry = getGeo(state.type);
-  const c = COLORS[state.color];
-  ghostMat.color.set(c.hex);
-  ghostMat.emissive.set(c.hex).multiplyScalar(0.25);
-  ghostMat.metalness = c.finish === 'metal' ? 0.8 : 0;
+  const c = COLORS[state.color], w = WEIRD[state.type.kind], hex = w ? w.ghost : c.hex;
+  ghostMat.color.set(hex);
+  ghostMat.emissive.set(hex).multiplyScalar(0.25);
+  ghostMat.metalness = !w && c.finish === 'metal' ? 0.8 : 0;
   syncHeld();
   hoverDirty = true;
 }
@@ -1715,8 +2206,8 @@ function updateHover() {
         outline.scale.set(tmpV.x + 0.08, tmpV.y + 0.08, tmpV.z + 0.08);
         outline.material.color.set(tool === 'erase' ? 0xff3b30 : tool === 'paint' ? COLORS[state.color].hex : 0xF2CD37);
         outline.visible = true;
-        if (tool === 'erase') setHoverPreview(info.mesh, info.color, eraseMat);
-        else if (tool === 'paint') setHoverPreview(info.mesh, info.color, mat(state.color));
+        if (tool === 'erase') setHoverPreview(info.mesh, eraseMat);
+        else if (tool === 'paint' && !isWeird(info.type)) setHoverPreview(info.mesh, mat(state.color));
       }
     }
   }
@@ -1743,7 +2234,7 @@ function heldMat(ci) {
 function syncHeld() {
   const g = getGeo(state.type), size = new THREE.Vector3(), ctr = new THREE.Vector3();
   g.boundingBox.getSize(size); g.boundingBox.getCenter(ctr);
-  heldMesh.geometry = g; heldMesh.material = heldMat(state.color); decorate(heldMesh, state.type);
+  heldMesh.geometry = g; heldMesh.material = WEIRD_MAT[state.type.kind] || heldMat(state.color); decorate(heldMesh, state.type);
   heldScale = Math.min(0.42, 0.7 / Math.max(size.x, size.y, size.z)); heldCy = ctr.y;
 }
 const easeOutCubic = x => 1 - Math.pow(1 - x, 3);
@@ -2000,7 +2491,7 @@ function clickWith(tool) {
     const pl = placementFor(hit); if (!pl) return;
     const brick = { id: nextId++, type: state.type.id, color: state.color, x: pl.x, y: pl.y, z: pl.z, rot: state.rot };
     if (net.guest) return net.cmd('add', { brick }); // the host gives it an id and puts it on both screens
-    commit({ kind: 'add', brick });
+    placeBrick(brick);
     sfx('add');
     return;
   }
@@ -2008,13 +2499,14 @@ function clickWith(tool) {
   if (!info) return;
   if (tool === 'erase') { info.where === 'grid' ? eraseGrid(id) : eraseDebris(id); }
   else if (tool === 'paint') {
+    if (isWeird(info.type)) { toast(`Paint doesn’t stick to ${partName(TYPE_BY_ID[info.type])}`); return; }
     if (info.color === state.color) return;
     if (net.guest) return net.cmd('paint', { id, color: state.color });
     commit({ kind: 'paint', id, from: info.color, to: state.color }); sfx('paint');
   }
   else if (tool === 'pick') {
     setRot(info.rot); selectColor(info.color); selectType(TYPE_BY_ID[info.type]); setTool('build');
-    toast(`Copied ${COLORS[info.color].name} ${partName(TYPE_BY_ID[info.type])}`);
+    toast(isWeird(info.type) ? `Copied ${partName(TYPE_BY_ID[info.type])}` : `Copied ${COLORS[info.color].name} ${partName(TYPE_BY_ID[info.type])}`);
   }
 }
 // Touch: the first tap shows where the part would go; tapping it again (or Place) puts it there.
@@ -2031,7 +2523,7 @@ function placePending() {
   const t = state.type, y = settleAt(t, state.rot, pending.x, pending.y, pending.z);
   if (y === null) return;
   const brick = { id: nextId++, type: t.id, color: state.color, x: pending.x, y, z: pending.z, rot: state.rot };
-  if (net.guest) net.cmd('add', { brick }); else { commit({ kind: 'add', brick }); sfx('add'); }
+  if (net.guest) net.cmd('add', { brick }); else { placeBrick(brick); sfx('add'); }
   pending = { x: pending.x, y, z: pending.z }; hoverDirty = true; // the next one waits on top, ready to stack or nudge
 }
 // One stud at a time, in the grid direction closest to where the arrow points on screen.
@@ -2096,6 +2588,7 @@ document.addEventListener('pointerup', e => { const b = e.target.closest && e.ta
 
 /* ───────────────────────── UI ───────────────────────── */
 const partName = t => {
+  if (WEIRD[t.kind]) return { water4x4: 'pool of water', lava4x4: 'pool of lava', slime2x2: 'slime block' }[t.id] || t.label.toLowerCase();
   if (t.kind === 'tnt') return `${t.label} TNT brick`;
   if (t.group === 'Bricks') return `${t.label} brick`;
   if (t.group === 'Plates') return `${t.label} plate`;
@@ -2120,9 +2613,11 @@ const TOUCH_HINTS = {
   pick: '<b>Tap</b> a part to copy its shape and color',
 };
 function updateHint() {
-  const tool = state.tool, tnt = isTNT(state.type.id) ? { build: touchMode ? '<br>The plunger lights every fuse' : '<br><b>D</b> lights every fuse', throw: '<br>Thrown TNT goes off where it lands' }[tool] : '';
+  const tool = state.tool, w = WEIRD[state.type.kind]; // what the part in hand does, for TNT and weird parts
+  const extra = w ? (tool === 'build' || tool === 'throw' ? '<br>' + w[tool] : '')
+    : isTNT(state.type.id) ? { build: touchMode ? '<br>The plunger lights every fuse' : '<br><b>D</b> lights every fuse', throw: '<br>Thrown TNT goes off where it lands' }[tool] : '';
   const cam = touchMode ? 'Drag to look around, pinch to zoom, two fingers to pan' : 'Drag to orbit, right-drag to pan, scroll to zoom';
-  $('hint').innerHTML = (touchMode ? TOUCH_HINTS : HINTS)[tool] + (tnt || '') + `<span class="cam">${cam}</span>`;
+  $('hint').innerHTML = (touchMode ? TOUCH_HINTS : HINTS)[tool] + (extra || '') + `<span class="cam">${cam}</span>`;
 }
 function setTool(tool) {
   state.tool = tool;
@@ -2151,7 +2646,7 @@ function setRot(r) {
 }
 
 // Parts library
-const lib = $('lib'), partButtons = new Map();
+const lib = $('lib'), partButtons = new Map(), toldWeird = new Set();
 {
   let grid = null, group = null;
   for (const t of TYPES) {
@@ -2163,7 +2658,10 @@ const lib = $('lib'), partButtons = new Map();
     const b = document.createElement('button'); b.className = 'part'; b.title = partName(t);
     b.setAttribute('aria-label', partName(t));
     b.innerHTML = `<img alt=""><span>${t.label.replace('Plate ', '')}</span>`;
-    b.addEventListener('click', () => { selectType(t); if (state.tool !== 'build' && state.tool !== 'throw') setTool('build'); });
+    b.addEventListener('click', () => {
+      selectType(t); if (state.tool !== 'build' && state.tool !== 'throw') setTool('build');
+      if (WEIRD[t.kind] && !toldWeird.has(t.kind)) { toldWeird.add(t.kind); toast(WEIRD[t.kind].tip); } // what it does, the first time you pick one
+    });
     grid.appendChild(b); partButtons.set(t.id, b);
   }
 }
@@ -2259,9 +2757,9 @@ function setQuality(i) {
   if (q.shadow) sun.shadow.mapSize.set(q.shadow, q.shadow);
   flash.visible = q.rich;
   studDetail(); shadowKey = '';
-  [baseMat, ...matCache.values()].forEach(tuneMat);
+  [baseMat, ...matCache.values(), waterMat, slimeMat].forEach(tuneMat);
   // Shadow and shine changes need fresh shaders, including for parts that aren't on screen right now.
-  const all = new Set([eraseMat, ...matCache.values(), ...heldMats.values(), ...bandMats.values()]);
+  const all = new Set([eraseMat, ...matCache.values(), ...heldMats.values(), ...bandMats.values(), ...Object.values(WEIRD_MAT), hotMat, diskMat]);
   for (const s of [scene, heldScene]) s.traverse(o => { for (const m of [].concat(o.material || [])) all.add(m); });
   for (const m of all) m.needsUpdate = true;
   scheduleThumbs();
@@ -2353,11 +2851,10 @@ let thumbQueued = false;
 function scheduleThumbs() { if (thumbQueued) return; thumbQueued = true; requestAnimationFrame(renderThumbs); }
 function renderThumbs() {
   thumbQueued = false;
-  thumbMesh.material = mat(state.color);
   for (const t of TYPES) {
-    const g = getGeo(t); thumbMesh.geometry = g; decorate(thumbMesh, t);
-    const s = g.boundingSphere;
-    const dist = s.radius / Math.sin(THREE.MathUtils.degToRad(thumbCam.fov / 2)) * 0.98;
+    const g = getGeo(t); thumbMesh.geometry = g; thumbMesh.material = skin(t, state.color); decorate(thumbMesh, t);
+    const s = g.boundingSphere, r = t.kind === 'hole' ? 1.6 : s.radius; // a black hole's picture takes in its glowing disk
+    const dist = r / Math.sin(THREE.MathUtils.degToRad(thumbCam.fov / 2)) * 0.98;
     thumbCam.position.copy(s.center).addScaledVector(thumbDir, dist); thumbCam.lookAt(s.center);
     thumbR.render(thumbScene, thumbCam);
     partButtons.get(t.id).querySelector('img').src = thumbR.domElement.toDataURL('image/png');
@@ -2372,8 +2869,9 @@ const DEMO = [
   ['b1x2','White',-6,3,-9,1], ['b1x4','White',-4,3,-9,1], ['b1x4','White',0,3,-9,1], ['b1x2','White',4,3,-9,1],
   ['b1x4','Bright Red',-6,6,-9,1], ['b1x4','Bright Red',-2,6,-9,1], ['b1x4','Bright Red',2,6,-9,1],
   ['b1x2','White',-6,9,-9,1], ['b1x4','White',-4,9,-9,1], ['b1x4','White',0,9,-9,1], ['b1x2','White',4,9,-9,1],
-  // ...and something to knock it down with (press D)
+  // ...and something to knock it down with (press D), into the pool behind it, where the pieces float
   ['tnt2x2','Bright Red',-1,0,-7,0],
+  ['water4x4','Trans Light Blue',-6,0,-14,0], ['water4x4','Trans Light Blue',-2,0,-14,0], ['water4x4','Trans Light Blue',2,0,-14,0],
   // a tall tower
   ['b2x2','Blue',8,0,-1,0], ['b2x2','Medium Azure',8,3,-1,0], ['b2x2','Blue',8,6,-1,0], ['b2x2','Medium Azure',8,9,-1,0],
   ['b2x2','Blue',8,12,-1,0], ['b2x2','Medium Azure',8,15,-1,0], ['dome','Pearl Gold',8,18,-1,0],
@@ -2420,6 +2918,7 @@ addEventListener('beforeunload', saveNow);
 controls.addEventListener('change', () => { hoverDirty = true; });
 
 let lastT = performance.now(), wasAwake = false;
+const spiral = new THREE.Vector3();
 function loop(now) {
   requestAnimationFrame(loop);
   const dt = Math.min(0.05, Math.max(0, (now - lastT) / 1000)), sdt = dt * timeScale; lastT = now;
@@ -2433,6 +2932,7 @@ function loop(now) {
   controls.update(); keepOnBoard(); studDetail(); fitShadow();
   const awake = net.guest ? false : stepPhysics(dt); // a guest's loose pieces move to the host's positions instead
   updateFuses(now, sdt);
+  animateWeird(now, sdt);
   if (awake) { hoverDirty = true; updateCounts(); }
   if (wasAwake && !awake) scheduleSave();
   wasAwake = awake;
@@ -2444,6 +2944,21 @@ function loop(now) {
       a.mesh.position.y = a.from + (a.to - a.from) * easeOutCubic(k);
     } else if (a.kind === 'grow') {
       a.mesh.scale.setScalar(a.s0 + (1 - a.s0) * easeOutCubic(k));
+    } else if (a.kind === 'jiggle') { // slime that was hit
+      if (a.mesh.parent !== a.parent) { anims.splice(i, 1); continue; }
+      const s = (now - a.t0) / 1000, w = k >= 1 ? 0 : a.k * 0.22 * Math.sin(s * 30) * Math.exp(-s * 7);
+      a.mesh.scale.set(1 + w * 0.6, 1 - w, 1 + w * 0.6);
+    } else if (a.kind === 'eat') { // spiralling into a black hole, shrinking to nothing
+      const e = k * k;
+      a.mesh.position.copy(a.to).add(spiral.subVectors(a.from, a.to).applyAxisAngle(UP, k * 5).multiplyScalar(1 - e));
+      a.mesh.rotation.x += a.spin * dt; a.mesh.rotation.z += a.spin * 0.7 * dt;
+      a.mesh.scale.setScalar(Math.max(0.001, a.s0 * (1 - e)));
+      if (k >= 1) fxGroup.remove(a.mesh);
+    } else if (a.kind === 'melt') { // glowing hot and slumping away
+      const e = easeInOut(k);
+      a.mesh.scale.set(a.s0 * (1 + 0.3 * e), Math.max(0.001, a.s0 * (1 - e)), a.s0 * (1 + 0.3 * e));
+      a.mesh.position.y = a.from.y - 0.12 * e;
+      if (k >= 1) fxGroup.remove(a.mesh);
     } else {
       const s = Math.max(0.001, 1 - easeInBack(k));
       a.mesh.scale.setScalar(a.s0 * s); a.mesh.position.y = a.y0 + k * 0.4;
@@ -2483,6 +2998,7 @@ if (location.protocol.startsWith('http')) {
     addBrick, detachGrid, removeBrick, recolor, buildCompound, removeCompound, popMesh, grow, restoreWorld, worldSnapshot,
     commit, undo, redo, eraseGrid, eraseDebris, throwWith, lightUp, unlitTNT, sweepLoose, clearAll, openModel,
     ignite, boomFx, sfx, setBase, setClutch, setTimeScale, updateSlow, toast, changed, togglePop, scheduleSave,
+    placeBrick, paintable, weirdFx,
     newId: () => nextId++, simTime: () => simTime, timeScale: () => timeScale, ghostAt: () => ghostAt, markHover: () => { hoverDirty = true; },
   };
   import('./js/multiplayer.js').then(m => m.start(game)).catch(() => {});

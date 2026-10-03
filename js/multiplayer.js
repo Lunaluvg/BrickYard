@@ -13,7 +13,7 @@
 import { relayRoom, relayLink } from './relay.js';
 
 const MAX_PLAYERS = 5;
-const PROTOCOL = 2; // copies of the game on different versions can't play together; bump when the messages change
+const PROTOCOL = 3; // copies of the game on different versions can't play together; bump when the messages change
 const TINT = { 1: '#F2CD37', 2: '#36AEBF', 3: '#FE8A18', 4: '#AC78BA', 5: '#BBE90B' };
 const PEERJS = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';
 // STUN servers tell each browser its public address, so two browsers can find a direct way to each other.
@@ -211,7 +211,7 @@ function run(g, info) {
       case 'add': {
         const b = m.brick || {}, t = T[b.type], rot = b.rot & 3;
         if (t && okColor(b.color) && [b.x, b.y, b.z].every(Number.isInteger) && g.fits(t, rot, b.x, b.y, b.z)) {
-          g.commit({ kind: 'add', brick: { id: g.newId(), type: b.type, color: b.color, x: b.x, y: b.y, z: b.z, rot } });
+          g.placeBrick({ id: g.newId(), type: b.type, color: b.color, x: b.x, y: b.y, z: b.z, rot });
           g.sfx('add');
         }
         break;
@@ -220,7 +220,7 @@ function run(g, info) {
       case 'eraseDebris': if (g.debrisParts.has(m.id)) g.eraseDebris(m.id); break;
       case 'paint': {
         const info = g.partInfo(m.id);
-        if (info && okColor(m.color) && info.color !== m.color) { g.commit({ kind: 'paint', id: m.id, from: info.color, to: m.color }); g.sfx('paint'); }
+        if (info && g.paintable(m.id) && okColor(m.color) && info.color !== m.color) { g.commit({ kind: 'paint', id: m.id, from: info.color, to: m.color }); g.sfx('paint'); }
         break;
       }
       case 'throw': {
@@ -275,6 +275,7 @@ function run(g, info) {
       case 'f': g.ignite(o[1], o[2], !!o[3]); break;
       case 'fc': g.fuses.clear(); break;
       case 'fx': g.boomFx(new THREE.Vector3(o[1], o[2], o[3]), o[4]); break;
+      case 'w': g.weirdFx(o[1], o[2], o[3], o[4], o[5]); break; // weird parts: a swallow, a melt, a splash, steam…
       case 's': g.sfx(o[1], o[2]); break;
       case 'base': g.setBase(o[1]); break;
       case 'clutch': g.setClutch(o[1]); break;
